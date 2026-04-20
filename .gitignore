@@ -1,0 +1,20 @@
+# --- Secretos ---
+.env
+
+# --- Docker & Modelos (PESADO) ---
+data/
+docker/ollama/
+ollama/
+# Ignora cualquier archivo de base de datos o modelos descargados
+*.bin
+*.gguf
+
+# --- Python ---
+__pycache__/
+.venv/
+.pytest_cache/
+
+# --- Windows & Sistema ---
+Thumbs.db
+desktop.ini
+.DS_Store

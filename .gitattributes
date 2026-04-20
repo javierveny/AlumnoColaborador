@@ -1,0 +1,8 @@
+# Forzar que todos los archivos de texto se normalicen a LF al subir al repo
+* text=auto
+
+# Asegurar que archivos específicos de Python y Docker siempre usen LF
+*.py text eol=lf
+*.pyproject text eol=lf
+Dockerfile text eol=lf
+docker-compose.yml text eol=lf

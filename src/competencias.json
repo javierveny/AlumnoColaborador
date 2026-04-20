@@ -1,0 +1,142 @@
+{
+  "asignaturas": [
+    {
+      "nombre": "Sistemas Digitales",
+      "competencias": [
+        {
+          "codigo": "CCM09",
+          "descripcion": "Capacitat de conèixer, comprendre i avaluar l'estructura i l'arquitectura dels computadors, així com els components bàsics que els conformen"
+        },
+        {
+          "codigo": "CTR01",
+          "descripcion": "Capacitat d'anàlisis i síntesis, d'organització, de planificació i de presa de decisions"
+        },
+        {
+          "codigo": "CTR07",
+          "descripcion": "Capacitat per a comunicar conceptes propis de la informàtica de manera oral i escrita en diferents àmbits d'actuació"
+        }
+      ]
+    },
+    {
+      "nombre": "Fundamentos de Computadores",
+      "competencias": {
+        "grado_ingenieria_informatica": [
+          {
+            "codigo": "13",
+            "descripcion": "Saber identificar los elementos y los principios de funcionamiento de un ordenador."
+          }
+        ],
+        "grado_tecnologias_telecomunicacion": [
+          {
+            "codigo": "23",
+            "descripcion": "Saber analizar i diseñar circuitos combinacionales y secuenciales, síncronos y asíncronos y la utilización de microprocesadores y circuitos integrados."
+          }
+        ],
+        "especificas": [
+          "Conocer la organización general de un computador como circuito digital y conocer las características de la arquitectura de Von Neumann.",
+          "Saber como se representa la información y, en particular, los números de forma digital: números naturales y enteros, tanto en signo y magnitud como en complemento a 2.",
+          "Entender los mecanismos de cambios de base en la representation de números.",
+          "Conocer y saber aplicar la álgebra de Boole para la manipulación de funciones lógicas.",
+          "Tener nociones tecnológicas de los circuitos digitales y entender la relación entre los circuitos digitales y las funciones lógicas.",
+          "Conocer y saber utilizar las puertas lógicas y los módulos combinacionals en el diseño de circuitos lógicos.",
+          "Entender el funcionamiento de los circuitos lógicos secuenciales y conocer y saber aplicar técnicas de diseño de sistemas secuenciales."
+        ],
+        "generales": [
+          "Capacidad de análisis y síntesis.",
+          "Resolución de problemas.",
+          "Capacidad de organización y planificación.",
+          "Comunicación oral y escrita.",
+          "Trabajo en equipo.",
+          "Razonamiento crítico."
+        ]
+      }
+    },
+    {
+      "nombre": "Programación I",
+      "competencias": {
+        "especificas": [
+          {
+            "codigo": "CFB03",
+            "descripcion": "Coneixements bàsics sobre l'ús i programació dels ordinadors, sistemes operatius, bases de dades i programes informàtics amb aplicació en enginyeria."
+          }
+        ],
+        "genericas": [
+          {
+            "codigo": "CTR01",
+            "descripcion": "Capacitat d'anàlisi i síntesi, d'organització, de planificació i de presa de decisions."
+          },
+          {
+            "codigo": "CTR07",
+            "descripcion": "Capacitat per comunicar conceptes propis de la informàtica de manera oral i escrita en diferents àmbits d'actuació."
+          }
+        ]
+      }
+    },
+    {
+      "nombre": "Lenguajes de Programación",
+      "competencias": {
+        "especificas": [
+          {
+            "codigo": "CBI2",
+            "descripcion": "Coneixements bàsics sobre l'ús i programació dels ordinadors, sistemes operatius, bases de dades i programes informàtics amb aplicació en enginyeria."
+          }
+        ],
+        "genericas": [
+          {
+            "codigo": "CG1",
+            "descripcion": "Raonament crític: capacitat per analitzar i valorar diferents alternatives."
+          },
+          {
+            "codigo": "CG2",
+            "descripcion": "Resolució de problemes: capacitat per trobar solucions òptimes a problemes i projectes complexos."
+          },
+          {
+            "codigo": "CG7",
+            "descripcion": "Coneixement del software i les eines informàtiques d'ajuda per a la generació i presentació de documentació."
+          }
+        ]
+      }
+    },
+    {
+      "nombre": "Sistemas Inteligentes",
+      "competencias": {
+        "especificas": [
+          {
+            "codigo": "CI304",
+            "descripcion": "Capacidad para conocer los fundamentos, paradigmas y técnicas propias de los sistemas inteligentes y analizar, diseñar y construir sistemas, servicios y aplicaciones informáticas que utilicen dichas técnicas en cualquier ámbito de aplicación."
+          },
+          {
+            "codigo": "CI305",
+            "descripcion": "Capacidad para adquirir, obtener, formalizar y representar el conocimiento humano en una forma computable para la resolución de problemas mediante un sistema informático en cualquier ámbito de aplicación, particularmente los relacionados con aspectos de computación, percepción y actuación en ambientes o entornos inteligentes."
+          },
+          {
+            "codigo": "CI307",
+            "descripcion": "Capacidad para conocer y desarrollar técnicas de aprendizaje computacional y diseñar e implementar aplicaciones y sistemas que las utilicen, incluyendo las dedicadas a la extracción automática de información y conocimiento a partir de grandes volúmenes de datos."
+          }
+        ],
+        "genericas": [
+          {
+            "codigo": "CTR01",
+            "descripcion": "Capacidad de análisis y síntesis, de organización, de planificación y toma de decisiones."
+          },
+          {
+            "codigo": "CTR02",
+            "descripcion": "Capacidad de análisis crítico y de propuesta y aplicación de nuevas soluciones."
+          },
+          {
+            "codigo": "CTR03",
+            "descripcion": "Capacidad para adquirir de forma autónoma nuevos conocimientos."
+          },
+          {
+            "codigo": "CTR04",
+            "descripcion": "Capacidad para la búsqueda de recursos y de gestión de la información en el ámbito de la informática."
+          },
+          {
+            "codigo": "CTR07",
+            "descripcion": "Capacidad para comunicar conceptos propios de la informática de manera oral y escrita en diferentes ámbitos de actuación."
+          }
+        ]
+      }
+    }
+  ]
+}
