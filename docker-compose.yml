@@ -28,13 +28,6 @@ services:
     entrypoint: ["/init.sh"]
     networks:
       - backend
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
 
   minio:
     image: minio/minio:latest

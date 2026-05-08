@@ -7,16 +7,27 @@ from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 import pdfplumber
 import requests
+import re
 
 # 1. Leer las variables del entorno Docker
 uri_mongo = os.getenv("MONGO_URI")
 ollama_host = os.getenv("OLLAMA_HOST", "http://ollama:11434")
-modelo_llm = os.getenv("OLLAMA_MODEL", "llama3.2") # Coge el modelo de tu .env, si no hay pone "llama3.2"
+api_key_openrouter = os.getenv("OPENROUTER_API_KEY")
+
 
 # 2. Conexión a tu IA Local (Ollama) usando el cliente de OpenAI
+# modelo_llm = os.getenv("OLLAMA_MODEL", "llama3.2") # Coge el modelo de tu .env, si no hay pone "llama3.2"
+# cliente = OpenAI(
+#     base_url=f"{ollama_host}/v1", # Le añadimos /v1 porque así lo pide la librería
+#     api_key="ollama", # Ollama es gratis y local, no necesita key, pero la librería exige que pongamos algo
+# )
+
+# conexion a openrouter
+# modelo_llm = "liquid/lfm-2.5-1.2b-thinking:free" # solo saca una pregunta
+modelo_llm = "google/gemma-4-31b-it:free"
 cliente = OpenAI(
-    base_url=f"{ollama_host}/v1", # Le añadimos /v1 porque así lo pide la librería
-    api_key="ollama", # Ollama es gratis y local, no necesita key, pero la librería exige que pongamos algo
+    base_url="https://openrouter.ai/api/v1", # <--- APUNTAMOS A INTERNET
+    api_key=api_key_openrouter,              # <--- USAMOS TU CLAVE REAL
 )
 
 # url kahoot json
@@ -110,112 +121,164 @@ def procesar_respuesta_llm(respuesta_llm):
         return None
     
 
+def comprobar_respuesta_llm(respuesta_llm, campos_requeridos):
+    # comprobamos si existe un formato json
+    match = re.search(r"\[.*\]", respuesta_llm, re.DOTALL)
+
+    # si not match no hay un JSON valido
+    if not match:
+        print("No es un JSON válido")
+        return None
+
+    # obtenemos el json, desde '[' hasta ']'
+    datos_json = match.group(0)
+
+    # intentamos convertirlo a un diccionario, si hay algun typo dara error
+    try:
+        datos_json =  json.loads(datos_json)
+    except json.JSONDecodeError:
+        print("Había algun error en el JSON")
+        return None
+    
+    # comprobamos si esta vacio
+    if len(datos_json) == 0:
+        print("❌ El JSON está vacío, no ha extraído ninguna pregunta.")
+        return None
+
+    for pregunta in datos_json:
+        # Convertimos las claves del diccionario de la IA en un Set
+        claves_ia = set(pregunta.keys())
+        
+        # Comparamos si son EXACTAMENTE iguales
+        if claves_ia != campos_requeridos:
+            print(f"Error de formato: La IA ha devuelto campos incorrectos.")
+            # Aquí podrías ver qué falta o sobra para decírselo al LLM en el reintento:
+            # faltan = campos_requeridos - claves_ia
+            # sobran = claves_ia - campos_requeridos
+            return None
+    
+    return datos_json
+    
+
 # funcion principal para hacer las llamadas a la api y guardar en la base de datos
 # llamada a la api del llm
 def llamada_llm(info = False):
-    if not info:
-        completion = cliente.chat.completions.create(
-        extra_headers={},
-        extra_body={},
-        model=modelo_llm,
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "Eres un extractor de datos académicos. Tu salida debe ser exclusivamente "
-                    "una LISTA de objetos JSON (un array de Python [{}, {}]).\n"
-                    "REGLA CRÍTICA PARA 'Curso': Elige únicamente entre: 'Primero', 'Segundo', 'Tercero', 'Cuarto'.\n"
-                    "REGLA CRÍTICA, Si el examen tiene varios ejercicios, crea un objeto para cada uno, ES OBLIGATORIO\n"
-                    "REGLA CRÍTICA, Si hay preguntas tipo test, selección múltiple... en el enunciado tiene que haber todas las posibles respuestas. ES OBLIGATORIO"
-                )
-            },
-            {
-                "role": "user",
-                "content": (
-                    "Analiza el texto del examen y genera una lista de JSONs con este formato:\n"
-                    "[\n"
-                    "  {\n"
-                    '    "Asignatura": "...",\n'
-                    '    "Curso": "Primero, Segundo, Tercero o Cuarto",\n'
-                    '    "Estudios": "...",\n'
-                    '    "Enunciado_completo": "...Si es tipo test, pon las posibles respuestas en el enunciado",\n'
-                    '    "Solución": "..."\n'
-                    "  }\n"
-                    "]\n\n"
-                    f"TEXTO DEL EXAMEN:\n{texto_del_documento}"
-                )
-            }
-        ]
-        )
-    else: # si ya tenemos metadatos rellanados hacemos este otro prompt
-        completion = cliente.chat.completions.create(
-        extra_headers={},
-        extra_body={},
-        model=modelo_llm,
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "Eres un extractor de datos académicos estructurados. Tu salida debe ser EXCLUSIVAMENTE "
-                    "una LISTA de objetos JSON (un array de Python [{}, {}]).\n"
-                    "REGLA CRÍTICA DE FUSIÓN: Vas a recibir dos textos: 'METADATOS' y 'EXAMEN'. "
-                    "Debes crear un objeto JSON por CADA pregunta que encuentres en el texto del EXAMEN.\n"
-                    "REGLA CRÍTICA DE COPIA: Para cada pregunta, debes COPIAR EXACTAMENTE todos los campos de los METADATOS (Asignatura, Estudios, Autores, Nivel_cognitivo_Bloom, Tipo_pregunta, Competencias_relacionadas, Nivel de dificultad, Tema / topic, Idioma). Estos valores serán idénticos para todas las preguntas de este lote.\n"
-                    "REGLA CRÍTICA DE EXTRACCIÓN: Los únicos campos que cambian en cada objeto JSON son 'Enunciado_completo' y 'Solución', los cuales debes extraer individualmente del texto del EXAMEN.\n"
-                    "REGLA CRÍTICA PARA 'Curso': Lee el curso en los metadatos y elige únicamente entre: 'Primero', 'Segundo', 'Tercero', 'Cuarto'.\n"
-                    "REGLA CRÍTICA, Si hay preguntas tipo test, selección múltiple... en el enunciado tiene que haber todas las posibles respuestas. ES OBLIGATORIO"
-                )
-            },
-            {
-                "role": "user",
-                "content": (
-                    "Analiza los metadatos y el texto del examen, y genera la lista de JSONs con este formato:\n"
-                    "[\n"
-                    "  {\n"
-                    '    "Asignatura": "... (Copiado de METADATOS)",\n'
-                    '    "Curso": "Primero, Segundo, Tercero o Cuarto (Copiado de METADATOS)",\n'
-                    '    "Estudios": "... (Copiado de METADATOS)",\n'
-                    '    "Autores": "... (Copiado de METADATOS)",\n'
-                    '    "Nivel_cognitivo_Bloom": "... (Copiado de METADATOS)",\n'
-                    '    "Tipo_pregunta": "... (Copiado de METADATOS)",\n'
-                    '    "Competencias_relacionadas": "... (Copiado de METADATOS)",\n'
-                    '    "Nivel de dificultad": "... (Copiado de METADATOS)",\n'
-                    '    "Tema / topic": "... (Copiado de METADATOS)",\n'
-                    '    "Idioma": "... (Copiado de METADATOS)",\n'
-                    '    "Enunciado_completo": "...Si es tipo test, pon las posibles respuestas en el enunciado (Extraído del EXAMEN para esta pregunta en concreto)",\n'
-                    '    "Solución": "... (Extraído del EXAMEN para esta pregunta en concreto)"\n'
-                    "  }\n"
-                    "]\n\n"
-                    f"--- METADATOS GLOBALES ---\n{texto_metadatos}\n\n"
-                    f"--- TEXTO DEL EXAMEN (PREGUNTAS Y RESPUESTAS) ---\n{texto_del_documento}"
-                )
-            }
-        ]
-        )
+    
+    i = 5
+    datos = None
 
-    # obtener la lista para guardarla
-    datos = procesar_respuesta_llm(completion.choices[0].message.content)
+    while (i > 0):
 
-    # PARCHE DE SEGURIDAD: Comprobar si la IA falló al hacer el JSON
+        if not info:
+            completion = cliente.chat.completions.create(
+            extra_headers={},
+            extra_body={},
+            model=modelo_llm,
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "Eres un extractor de datos técnicos preciso. Tu única función es transformar un JSON de Kahoot a una LISTA de objetos JSON.\n"
+                        "REGLA DE ORO: Debes generar UN objeto JSON por cada pregunta encontrada en el array 'questions'. No omitas ninguna.\n"
+                        "REGLA DE COPIA: El 'Enunciado_completo' debe incluir la pregunta seguida de todas sus opciones (A, B, C, D).\n"
+                        "REGLA DE CURSO: Elige estrictamente entre 'Primero', 'Segundo', 'Tercero', 'Cuarto'.\n"
+                        "REGLA DE SOLUCIÓN: Escribe el texto exacto de la opción marcada como 'correct': true."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "Transforma TODAS las preguntas de este examen a este formato de lista de Python [{}, {}, ...]:\n"
+                        "[\n"
+                        "  {\n"
+                        '    "Asignatura": "...",\n'
+                        '    "Curso": "Primero, Segundo, Tercero o Cuarto",\n'
+                        '    "Estudios": "...",\n'
+                        '    "Enunciado_completo": "...Si es tipo test, pon las posibles respuestas en el enunciado",\n'
+                        '    "Solución": "..."\n'
+                        "  }\n"
+                        "]\n\n"
+                        f"TEXTO DEL EXAMEN:\n{texto_del_documento}"
+                    )
+                }
+            ],
+            temperature = 0
+            )
+
+            campos_requeridos = {"Asignatura", "Curso", "Estudios", "Enunciado_completo", "Solución"}
+
+
+        else: # si ya tenemos metadatos rellanados hacemos este otro prompt
+            completion = cliente.chat.completions.create(
+            extra_headers={},
+            extra_body={},
+            model=modelo_llm,
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "Eres un extractor de datos académicos estructurados. Tu salida debe ser EXCLUSIVAMENTE "
+                        "una LISTA de objetos JSON (un array de Python [{}, {}]).\n"
+                        "REGLA CRÍTICA DE FUSIÓN: Vas a recibir dos textos: 'METADATOS' y 'EXAMEN'. "
+                        "Debes crear un objeto JSON por CADA pregunta que encuentres en el texto del EXAMEN.\n"
+                        "REGLA CRÍTICA DE COPIA: Para cada pregunta, debes COPIAR EXACTAMENTE todos los campos de los METADATOS (Asignatura, Estudios, Autores, Nivel_cognitivo_Bloom, Tipo_pregunta, Competencias_relacionadas, Nivel de dificultad, Tema / topic, Idioma). Estos valores serán idénticos para todas las preguntas de este lote.\n"
+                        "REGLA CRÍTICA DE EXTRACCIÓN: Los únicos campos que cambian en cada objeto JSON son 'Enunciado_completo' y 'Solución', los cuales debes extraer individualmente del texto del EXAMEN.\n"
+                        "REGLA CRÍTICA PARA 'Curso': Lee el curso en los metadatos y elige únicamente entre: 'Primero', 'Segundo', 'Tercero', 'Cuarto'.\n"
+                        "REGLA CRÍTICA, Si hay preguntas tipo test, selección múltiple... en el enunciado tiene que haber todas las posibles respuestas. ES OBLIGATORIO"
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "Analiza los metadatos y el texto del examen, y genera la lista de JSONs con este formato:\n"
+                        "[\n"
+                        "  {\n"
+                        '    "Asignatura": "... (Copiado de METADATOS)",\n'
+                        '    "Curso": "Primero, Segundo, Tercero o Cuarto (Copiado de METADATOS)",\n'
+                        '    "Estudios": "... (Copiado de METADATOS)",\n'
+                        '    "Autores": "... (Copiado de METADATOS)",\n'
+                        '    "Nivel_cognitivo_Bloom": "... (Copiado de METADATOS)",\n'
+                        '    "Tipo_pregunta": "... (Copiado de METADATOS)",\n'
+                        '    "Competencias_relacionadas": "... (Copiado de METADATOS)",\n'
+                        '    "Nivel de dificultad": "... (Copiado de METADATOS)",\n'
+                        '    "Tema / topic": "... (Copiado de METADATOS)",\n'
+                        '    "Idioma": "... (Copiado de METADATOS)",\n'
+                        '    "Enunciado_completo": "...Si es tipo test, pon las posibles respuestas en el enunciado (Extraído del EXAMEN para esta pregunta en concreto)",\n'
+                        '    "Solución": "... (Extraído del EXAMEN para esta pregunta en concreto)"\n'
+                        "  }\n"
+                        "]\n\n"
+                        f"--- METADATOS GLOBALES ---\n{texto_metadatos}\n\n"
+                        f"--- TEXTO DEL EXAMEN (PREGUNTAS Y RESPUESTAS) ---\n{texto_del_documento}"
+                    )
+                }
+            ]
+            )
+
+            campos_requeridos = {"Asignatura", "Curso", "Estudios", "Autores", "Nivel_cognitivo_Bloom", "Tipo_pregunta", "Competencias_relacionadas", "Nivel de dificultad", "Tema / topic", "Idioma", "Enunciado_completo", "Solución"}
+
+
+        datos = comprobar_respuesta_llm(completion.choices[0].message.content, campos_requeridos)
+
+        if datos is None:
+            i -= 1
+        else:
+            print("🎉 ¡La IA ha acertado el formato!")
+            break 
+
     if datos is None:
-        print("❌ Error: La IA no ha devuelto un JSON válido. Abortando operación.")
-        return # Salimos de la función para que no intente guardar ni continuar
+        print("⚠️ Se han agotado los 3 intentos. Abortando esta extracción.")
+        return
+    else:
+        with open("src/data.json", "w", encoding="utf-8") as f:
+            json.dump(datos, f, ensure_ascii=False, indent=4)
+        print("✅ Json guardado correctamente como copia de seguridad.")
+        
+        # Pasamos los datos directamente por la memoria a la siguiente función
+        segunda_iteracion_llm(datos)
 
-    # Si todo ha ido bien, guardamos la lista en un archivo json
-    with open("src/data.json", "w", encoding="utf-8") as f:
-        json.dump(datos, f, ensure_ascii=False, indent=4)
-    print("✅ Json guardado correctamente")
 
-    # Y pasamos a la segunda fase
-    segunda_iteracion_llm()
-
-
-def segunda_iteracion_llm():
+def segunda_iteracion_llm(datos):
     # ////////////////  Segunda iteracion sobre cada pregunta  ////////////////
-
-    # leemos el fichero y lo cargamos en memoria
-    with open("src/data.json", 'r', encoding='utf-8') as file:
-        datos = json.load(file)
 
     # leemos el fichero de competencias
     with open("src/competencias.json", 'r', encoding='utf-8') as file:
@@ -230,8 +293,6 @@ def segunda_iteracion_llm():
     db = clienteMongo["proyecto_alumno_colaborador"]
     coleccion = db["preguntas_examenes"]
 
-    # iterador para guardar las preguntas en json distintos
-    iterador = 1
     # recorremos la lista para rellenar los otros campos
     for elemento in datos:
         completion = cliente.chat.completions.create(
@@ -269,14 +330,10 @@ def segunda_iteracion_llm():
         # pasamos la respuesta del llm a una lista de python
         respuesta_llm = procesar_respuesta_llm(completion.choices[0].message.content)
 
-        # coleccion.insert_one(respuesta_llm[0])
-        # print("guardado en mongoDB")
 
         if respuesta_llm and len(respuesta_llm) > 0:
-            # 2. MAGIA: Mezclamos el objeto original con el del LLM
-            # Esto actualiza 'elemento' con los datos de 'respuesta_llm[0]'
-            # Si hay campos repetidos, ganan los del LLM (los nuevos)
-            elemento.update(respuesta_llm[0])
+            # Mezclamos el objeto original con el del LLM
+            elemento.update(respuesta_llm)
             
             # 3. Guardamos el objeto COMPLETO
             coleccion.insert_one(elemento)
