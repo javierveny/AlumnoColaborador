@@ -4,13 +4,216 @@
         "Curso": "Primero",
         "Estudios": "Ingeniería Informática",
         "Autores": "Francesc Xavier Gayà Morey",
-        "Nivel_cognitivo_Bloom": "3",
-        "Tipo_pregunta": "test",
-        "Competencias_relacionadas": "GRAPHIC_THERAPY_UNDERSTANDING",
-        "Nivel de dificultad": "2",
-        "Tema / topic": "Programación I",
-        "Idioma": "Español",
-        "Enunciado_completo": "¿Al declarar una variable, qué información NO incluímos?",
-        "Solución": "Una dirección de memoria"
+        "Nivel_cognitivo_Bloom": "Entender, Aplicar, Analizar, Evaluar",
+        "Tipo_pregunta": "Test: 4 opciones posibles, 1 de correcta Test con selección múltiple: 4 opciones posibles, entre 0 y 4 de correctas Verdadero o falso",
+        "Competencias_relacionadas": "CFB03 Genéricas: CTR01 CTR02",
+        "Nivel de dificultad": "Preguntas variadas de todas las dificultades",
+        "Tema / topic": "Programación básica. Lenguaje de programación Java.",
+        "Idioma": "Catalán",
+        "Enunciado_completo": "¿Cuál NO es condición necesaria para que haya secuencia?",
+        "Solución": [
+            {
+                "answer": "Existe primer elemento",
+                "correct": false
+            },
+            {
+                "answer": "Existe relación de sucesión",
+                "correct": false
+            },
+            {
+                "answer": "Existe último elemento",
+                "correct": false
+            },
+            {
+                "answer": "Todos los elementos son diferentes",
+                "correct": true
+            }
+        ]
+    },
+    {
+        "Asignatura": "Programación I",
+        "Curso": "Primero",
+        "Estudios": "Ingeniería Informática",
+        "Autores": "Francesc Xavier Gayà Morey",
+        "Nivel_cognitivo_Bloom": "Entender, Aplicar, Analizar, Evaluar",
+        "Tipo_pregunta": "Test: 4 opciones posibles, 1 de correcta Test con selección múltiple: 4 opciones posibles, entre 0 y 4 de correctas Verdadero o falso",
+        "Competencias_relacionadas": "CFB03 Genéricas: CTR01 CTR02",
+        "Nivel de dificultad": "Preguntas variadas de todas las dificultades",
+        "Tema / topic": "Programación básica. Lenguaje de programación Java.",
+        "Idioma": "Catalán",
+        "Enunciado_completo": "Recorrido vs búsqueda: ¿qué cambia en la condición de fin?",
+        "Solución": [
+            {
+                "answer": "Recorrido: fin al tratar todos",
+                "correct": true
+            },
+            {
+                "answer": "Búsqueda: puede terminar al encontrar",
+                "correct": true
+            },
+            {
+                "answer": "Recorrido: fin cuando se encuentre",
+                "correct": false
+            },
+            {
+                "answer": "Ambas siempre recorren todo",
+                "correct": false
+            }
+        ]
+    },
+    {
+        "Asignatura": "Programación I",
+        "Curso": "Primero",
+        "Estudios": "Ingeniería Informática",
+        "Autores": "Francesc Xavier Gayà Morey",
+        "Nivel_cognitivo_Bloom": "Entender, Aplicar, Analizar, Evaluar",
+        "Tipo_pregunta": "Test: 4 opciones posibles, 1 de correcta Test con selección múltiple: 4 opciones posibles, entre 0 y 4 de correctas Verdadero o falso",
+        "Competencias_relacionadas": "CFB03 Genéricas: CTR01 CTR02",
+        "Nivel de dificultad": "Preguntas variadas de todas las dificultades",
+        "Tema / topic": "Programación básica. Lenguaje de programación Java.",
+        "Idioma": "Catalán",
+        "Enunciado_completo": "Contar 'a': la condición del while es…",
+        "Solución": [
+            {
+                "answer": "letra == '.'",
+                "correct": false
+            },
+            {
+                "answer": "letra != '.'",
+                "correct": true
+            },
+            {
+                "answer": "letra == 'a'",
+                "correct": false
+            },
+            {
+                "answer": "siempre true",
+                "correct": false
+            }
+        ]
+    },
+    {
+        "Asignatura": "Programación I",
+        "Curso": "Primero",
+        "Estudios": "Ingeniería Informática",
+        "Autores": "Francesc Xavier Gayà Morey",
+        "Nivel_cognitivo_Bloom": "Entender, Aplicar, Analizar, Evaluar",
+        "Tipo_pregunta": "Test: 4 opciones posibles, 1 de correcta Test con selección múltiple: 4 opciones posibles, entre 0 y 4 de correctas Verdadero o falso",
+        "Competencias_relacionadas": "CFB03 Genéricas: CTR01 CTR02",
+        "Nivel de dificultad": "Preguntas variadas de todas las dificultades",
+        "Tema / topic": "Programación básica. Lenguaje de programación Java.",
+        "Idioma": "Catalán",
+        "Enunciado_completo": "Versión do-while de búsqueda: ¿qué afirmación es correcta?",
+        "Solución": [
+            {
+                "answer": "Se evalúa la condición antes de leer",
+                "correct": false
+            },
+            {
+                "answer": "Se lee al menos una vez",
+                "correct": true
+            },
+            {
+                "answer": "Nunca termina si hay punto",
+                "correct": false
+            },
+            {
+                "answer": "No necesita condición de fin",
+                "correct": false
+            }
+        ]
+    },
+    {
+        "Asignatura": "Programación I",
+        "Curso": "Primero",
+        "Estudios": "Ingeniería Informática",
+        "Autores": "Francesc Xavier Gayà Morey",
+        "Nivel_cognitivo_Bloom": "Entender, Aplicar, Analizar, Evaluar",
+        "Tipo_pregunta": "Test: 4 opciones posibles, 1 de correcta Test con selección múltiple: 4 opciones posibles, entre 0 y 4 de correctas Verdadero o falso",
+        "Competencias_relacionadas": "CFB03 Genéricas: CTR01 CTR02",
+        "Nivel de dificultad": "Preguntas variadas de todas las dificultades",
+        "Tema / topic": "Programación básica. Lenguaje de programación Java.",
+        "Idioma": "Catalán",
+        "Enunciado_completo": "Contar vocales por separado: ¿qué estructura es más adecuada?",
+        "Solución": [
+            {
+                "answer": "Bucle while + switch (letra)",
+                "correct": true
+            },
+            {
+                "answer": "Bucle while + if (letra=='a') ... else if(letra =='e') …",
+                "correct": false
+            },
+            {
+                "answer": "for anidado sobre 'aeiou'",
+                "correct": false
+            },
+            {
+                "answer": "while (letra=='a' || letra=='e' ...)",
+                "correct": false
+            }
+        ]
+    },
+    {
+        "Asignatura": "Programación I",
+        "Curso": "Primero",
+        "Estudios": "Ingeniería Informática",
+        "Autores": "Francesc Xavier Gayà Morey",
+        "Nivel_cognitivo_Bloom": "Entender, Aplicar, Analizar, Evaluar",
+        "Tipo_pregunta": "Test: 4 opciones posibles, 1 de correcta Test con selección múltiple: 4 opciones posibles, entre 0 y 4 de correctas Verdadero o falso",
+        "Competencias_relacionadas": "CFB03 Genéricas: CTR01 CTR02",
+        "Nivel de dificultad": "Preguntas variadas de todas las dificultades",
+        "Tema / topic": "Programación básica. Lenguaje de programación Java.",
+        "Idioma": "Catalán",
+        "Enunciado_completo": "¿Cuál es el último carácter leído al contar cuántos espacios hay tras la primera 't' en 'Lo importante es participar.'?",
+        "Solución": [
+            {
+                "answer": "'t'",
+                "correct": false
+            },
+            {
+                "answer": "' ' (último espacio)",
+                "correct": false
+            },
+            {
+                "answer": "' ' (primer espacio)",
+                "correct": false
+            },
+            {
+                "answer": "'.'",
+                "correct": true
+            }
+        ]
+    },
+    {
+        "Asignatura": "Programación I",
+        "Curso": "Primero",
+        "Estudios": "Ingeniería Informática",
+        "Autores": "Francesc Xavier Gayà Morey",
+        "Nivel_cognitivo_Bloom": "Entender, Aplicar, Analizar, Evaluar",
+        "Tipo_pregunta": "Test: 4 opciones posibles, 1 de correcta Test con selección múltiple: 4 opciones posibles, entre 0 y 4 de correctas Verdadero o falso",
+        "Competencias_relacionadas": "CFB03 Genéricas: CTR01 CTR02",
+        "Nivel de dificultad": "Preguntas variadas de todas las dificultades",
+        "Tema / topic": "Programación básica. Lenguaje de programación Java.",
+        "Idioma": "Catalán",
+        "Enunciado_completo": "Entrada 'Murcielago.' en búsqueda de la primera letra después de vocal: ¿cuál es el último carácter leído?",
+        "Solución": [
+            {
+                "answer": "'u'",
+                "correct": false
+            },
+            {
+                "answer": "'r'",
+                "correct": true
+            },
+            {
+                "answer": "'m'",
+                "correct": false
+            },
+            {
+                "answer": "'.'",
+                "correct": false
+            }
+        ]
     }
 ]

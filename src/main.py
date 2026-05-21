@@ -5,36 +5,97 @@ from pathlib import Path
 import json
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
+from minio import Minio
+import io
 import pdfplumber
 import requests
 import re
 
-# 1. Leer las variables del entorno Docker
+# Leer las variables del entorno Docker
 uri_mongo = os.getenv("MONGO_URI")
+
 ollama_host = os.getenv("OLLAMA_HOST", "http://ollama:11434")
+
 api_key_openrouter = os.getenv("OPENROUTER_API_KEY")
 
+minio_endpoint = os.getenv("MINIO_ENDPOINT", "minio:9000")
+minio_access_key = os.getenv("MINIO_ROOT_USER")
+minio_secret_key = os.getenv("MINIO_ROOT_PASSWORD")
+minio_bucket = os.getenv("MINIO_BUCKET", "documents")
 
-# 2. Conexión a tu IA Local (Ollama) usando el cliente de OpenAI
-# modelo_llm = os.getenv("OLLAMA_MODEL", "llama3.2") # Coge el modelo de tu .env, si no hay pone "llama3.2"
-# cliente = OpenAI(
-#     base_url=f"{ollama_host}/v1", # Le añadimos /v1 porque así lo pide la librería
-#     api_key="ollama", # Ollama es gratis y local, no necesita key, pero la librería exige que pongamos algo
-# )
+# inicializamos el cliente de minio
+cliente_minio = Minio(
+    minio_endpoint,
+    access_key=minio_access_key,
+    secret_key=minio_secret_key,
+    secure=False # Ponemos False porque estamos en local sin SSL
+)
+
+# nos conectamos a ollama usando el cliente openAI
+modelo_llm = os.getenv("OLLAMA_MODEL", "llama3.2") # Coge el modelo de tu .env, si no hay pone "llama3.2"
+cliente = OpenAI(
+    base_url=f"{ollama_host}/v1", # Le añadimos /v1 porque así lo pide la librería
+    api_key="ollama", # es necesario poner una key
+)
 
 # conexion a openrouter
 # modelo_llm = "liquid/lfm-2.5-1.2b-thinking:free" # solo saca una pregunta
-modelo_llm = "google/gemma-4-31b-it:free"
-cliente = OpenAI(
-    base_url="https://openrouter.ai/api/v1", # <--- APUNTAMOS A INTERNET
-    api_key=api_key_openrouter,              # <--- USAMOS TU CLAVE REAL
-)
+# modelo_llm = "google/gemma-4-31b-it:free"
+# cliente = OpenAI(
+#     base_url="https://openrouter.ai/api/v1", # <--- APUNTAMOS A INTERNET
+#     api_key=api_key_openrouter,              # <--- USAMOS TU CLAVE REAL
+# )
 
 # url kahoot json
 url_kahoot = "https://create.kahoot.it/rest/kahoots/"
 
 texto_del_documento = ""
 texto_metadatos = ""
+
+# funcion para subir los archivos originales
+def subir_a_minio(ruta_archivo):
+    nombre_archivo = Path(ruta_archivo).name
+    
+    # 1. Crear el bucket si no existe
+    if not cliente_minio.bucket_exists(minio_bucket):
+        cliente_minio.make_bucket(minio_bucket)
+        print(f"Bucket '{minio_bucket}' creado.")
+
+    # 2. Subir el archivo
+    try:
+        cliente_minio.fput_object(
+            minio_bucket, 
+            nombre_archivo, 
+            ruta_archivo
+        )
+        print(f"Archivo '{nombre_archivo}' subido con éxito a MinIO.")
+        return nombre_archivo
+    except Exception as err:
+        print(f"❌ Error subiendo a MinIO: {err}")
+        return None
+
+# funcion para subir el link dell kahoot a minio
+def subir_link_a_minio(link, nombre_archivo):
+    # 1. Convertimos el texto (link) en un flujo de bytes
+    datos_bytes = link.encode('utf-8')
+    flujo_datos = io.BytesIO(datos_bytes)
+    
+    # 2. Aseguramos que el bucket existe
+    if not cliente_minio.bucket_exists(minio_bucket):
+        cliente_minio.make_bucket(minio_bucket)
+
+    # 3. Subimos el "archivo" virtual a MinIO
+    try:
+        cliente_minio.put_object(
+            minio_bucket,
+            nombre_archivo,
+            flujo_datos,
+            length=len(datos_bytes),
+            content_type='text/plain'
+        )
+        print(f"🔗 Link guardado en MinIO como: {nombre_archivo}")
+    except Exception as err:
+        print(f"❌ Error guardando link en MinIO: {err}")
 
 def extraer_texto_docx(ruta_docx):
     doc = Document(ruta_docx)
@@ -256,8 +317,9 @@ def llamada_llm(info = False):
 
             campos_requeridos = {"Asignatura", "Curso", "Estudios", "Autores", "Nivel_cognitivo_Bloom", "Tipo_pregunta", "Competencias_relacionadas", "Nivel de dificultad", "Tema / topic", "Idioma", "Enunciado_completo", "Solución"}
 
+        respuesta_llm = completion.choices[0].message.content
 
-        datos = comprobar_respuesta_llm(completion.choices[0].message.content, campos_requeridos)
+        datos = comprobar_respuesta_llm(respuesta_llm, campos_requeridos)
 
         if datos is None:
             i -= 1
@@ -266,7 +328,11 @@ def llamada_llm(info = False):
             break 
 
     if datos is None:
-        print("⚠️ Se han agotado los 3 intentos. Abortando esta extracción.")
+        print("⚠️ Se han agotado los 5 intentos. Abortando esta extracción.")
+
+        print("\n🚨 --- LO QUE RESPONDIÓ LA IA EN EL ÚLTIMO INTENTO --- 🚨")
+        print(respuesta_llm)
+        print("🚨 --------------------------------------------------- 🚨\n")
         return
     else:
         with open("src/data.json", "w", encoding="utf-8") as f:
@@ -366,15 +432,25 @@ if __name__ == "__main__":
     # ////////////////  Obtener tipo de fichero  ////////////////
     match ruta_fichero.suffix:
         case ".docx":
+            subir_a_minio(fichero) # subimos el archivo original
             texto_del_documento = extraer_texto_docx(ruta_fichero)
             llamada_llm()
         case ".pdf":
+            subir_a_minio(fichero) # subimos le archivo original
             texto_del_documento = extraer_texto_pdf(ruta_fichero)
             llamada_llm()
         case ".txt":
             with open(ruta_fichero) as file:
                 for line in file:
-                    nombreKahoot = Path(line.rstrip()) # lo convertimos en una ruta para extraer el codigo
+                    link_original = line.strip()
+                    if not link_original: continue # saltamos lineas vacias
+                    
+                    # Creamos un nombre con el codigo del kahoot
+                    id_kahoot = Path(link_original).name
+                    nombre_en_minio = f"link_kahoot_{id_kahoot}.txt"
+                    subir_link_a_minio(link_original, nombre_en_minio)
+
+                    nombreKahoot = Path(link_original) # lo convertimos en una ruta para extraer el codigo
                     linkKahoot = url_kahoot + str(nombreKahoot.name) # concatenamos el link con el codigo del kahoot
                     respuesta = requests.get(linkKahoot) # hacemos una peticion a la url
                     texto_del_documento = respuesta.text # obtenemos el json con las preguntas
