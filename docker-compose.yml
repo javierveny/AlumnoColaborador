@@ -66,7 +66,10 @@ services:
       OLLAMA_HOST: http://ollama:11434
       OLLAMA_MODEL: ${OLLAMA_MODEL}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
-    command: ["uv", "run", "python", "-m", "src.main"]
+    ports:
+      - "8000:8000"
+    command: ["uv", "run", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"] # para fast api
+    # command: ["uv", "run", "python", "-m", "src.main"]
     networks:
       - backend
 

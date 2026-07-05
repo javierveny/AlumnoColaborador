@@ -10,6 +10,183 @@ import io
 import pdfplumber
 import requests
 import re
+from fastapi import FastAPI, UploadFile, File
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from urllib.parse import quote
+import shutil
+
+
+# --- INICIALIZACIÓN DE LA API ---
+app = FastAPI(
+    title="API Proyecto Alumno Colaborador",
+    description="API para procesar y consultar exámenes extraídos con IA",
+    version="1.0"
+)
+
+@app.get("/preguntas")
+def obtener_preguntas(
+    asignatura: str = None, 
+    curso: str = None, 
+    nivel_bloom: str = None
+):
+    # 1. Nos conectamos a la base de datos
+    clienteMongo = MongoClient(uri_mongo, server_api=ServerApi('1'))
+    db = clienteMongo["proyecto_alumno_colaborador"]
+    coleccion = db["preguntas_examenes"]
+
+    # 2. Construimos el filtro de búsqueda de MongoDB de forma dinámica
+    filtro = {}
+    
+    if asignatura:
+        # Usamos una expresión regular simple para que la búsqueda no sea sensible a mayusculas
+        filtro["Asignatura"] = {"$regex": asignatura, "$options": "i"}
+    
+    if curso:
+        filtro["Curso"] = curso # buscamos coincidencia exacta
+        
+    if nivel_bloom:
+        filtro["Nivel_cognitivo_Bloom"] = {"$regex": nivel_bloom, "$options": "i"}
+
+    # 3. Buscamos aplicando el filtro
+    preguntas_db = list(coleccion.find(filtro, {"_id": 0}))
+
+    # 4. Devolvemos el resultado
+    return {
+        "filtros_aplicados": filtro,
+        "total_preguntas": len(preguntas_db),
+        "datos": preguntas_db
+    }
+
+@app.get("/documentos/{nombre_archivo}")
+def descargar_documento(nombre_archivo: str):
+    try:
+        # 1. Le pedimos el archivo a MinIO
+        respuesta_minio = cliente_minio.get_object(minio_bucket, nombre_archivo)
+        
+        # 2. Creamos un "generador" para leer el archivo poco a poco y no saturar la RAM
+        def iterar_archivo():
+            try:
+                # Leemos en trozos de 32KB
+                for pedazo in respuesta_minio.stream(32 * 1024):
+                    yield pedazo
+            finally:
+                # Cerramos la conexión con MinIO cuando termine
+                respuesta_minio.close()
+                respuesta_minio.release_conn()
+
+        # lo codificamos por si tiene acentos...
+        nombre_codificado = quote(nombre_archivo)
+
+        # 3. Devolvemos el archivo al cliente forzando la descarga
+        return StreamingResponse(
+            iterar_archivo(), 
+            media_type="application/octet-stream", # Tipo genérico para archivos
+            headers={"Content-Disposition": f"attachment; filename={nombre_codificado}"}
+        )
+
+    except Exception as e:
+        return {"error": f"No se pudo descargar el archivo: {str(e)}"}
+
+# --- MODELOS DE DATOS (Lo que esperamos recibir en los POST) ---
+class PeticionKahoot(BaseModel):
+    url: str
+
+@app.post("/procesar-kahoot")
+def procesar_kahoot(peticion: PeticionKahoot):
+    # Declaramos que vamos a usar la variable global de tu código
+    global texto_del_documento
+    
+    # 1. Extraemos la URL que nos envía el usuario
+    link_original = peticion.url
+    
+    try:
+        # 2. Subimos el link a MinIO (tu código original)
+        id_kahoot = Path(link_original).name
+        nombre_en_minio = f"link_kahoot_{id_kahoot}.txt"
+        subir_link_a_minio(link_original, nombre_en_minio)
+
+        # 3. Descargamos el JSON de Kahoot (tu código original)
+        linkKahoot = url_kahoot + str(id_kahoot)
+        respuesta = requests.get(linkKahoot)
+        
+        if respuesta.status_code != 200:
+            return {"error": "No se pudo descargar el Kahoot. Comprueba el link."}
+            
+        texto_del_documento = respuesta.text
+
+        # 4. Llamamos a tu IA (Asumimos que Kahoot no usa metadatos de Word)
+        llamada_llm(info=False)
+
+        # 5. Devolvemos respuesta al cliente
+        return {
+            "estado": "Éxito",
+            "mensaje": f"El Kahoot {id_kahoot} ha sido procesado, subido a MinIO y guardado en MongoDB."
+        }
+        
+    except Exception as e:
+        return {"error": f"Ha ocurrido un fallo inesperado: {str(e)}"}
+    
+
+@app.post("/procesar-documento")
+def procesar_documento(
+    examen: UploadFile = File(...), 
+    archivo_metadatos: UploadFile = File(None) # Le ponemos None para que sea Opcional
+):
+    global texto_del_documento
+    global texto_metadatos
+
+    try:
+        # 1. Guardar el archivo de examen temporalmente en el disco
+        ruta_examen = f"src/{examen.filename}"
+        with open(ruta_examen, "wb") as buffer:
+            shutil.copyfileobj(examen.file, buffer)
+
+        # 2. Subir el original a MinIO (Tu función original)
+        subir_a_minio(ruta_examen)
+
+        # 3. Extraer el texto según la extensión
+        ruta_fichero = Path(ruta_examen)
+        if ruta_fichero.suffix == ".docx":
+            texto_del_documento = extraer_texto_docx(ruta_fichero)
+        elif ruta_fichero.suffix == ".pdf":
+            texto_del_documento = extraer_texto_pdf(ruta_fichero)
+        else:
+            os.remove(ruta_examen)
+            return {"error": "Formato de examen no soportado. Solo .pdf o .docx"}
+
+        # 4. Comprobar si el usuario también ha subido un archivo de Metadatos
+        tiene_metadatos = False
+        if archivo_metadatos:
+            ruta_meta = f"src/{archivo_metadatos.filename}"
+            with open(ruta_meta, "wb") as buffer:
+                shutil.copyfileobj(archivo_metadatos.file, buffer)
+            
+            ruta_meta_path = Path(ruta_meta)
+            if ruta_meta_path.suffix == ".docx":
+                texto_metadatos = extraer_texto_docx(ruta_meta_path)
+                tiene_metadatos = True
+            
+            # Borramos el temporal de metadatos
+            os.remove(ruta_meta)
+
+        # 5. Llamamos a la IA (Tu función original)
+        llamada_llm(info=tiene_metadatos)
+
+        # 6. Borramos el archivo temporal del examen de nuestro ordenador
+        os.remove(ruta_examen)
+
+        return {
+            "estado": "Éxito",
+            "mensaje": f"El documento {examen.filename} ha sido procesado correctamente."
+        }
+
+    except Exception as e:
+        return {"error": f"Ha ocurrido un fallo inesperado: {str(e)}"}
+
+
+
+
 
 # Leer las variables del entorno Docker
 uri_mongo = os.getenv("MONGO_URI")
@@ -408,51 +585,51 @@ def segunda_iteracion_llm(datos):
             print("⚠️ El LLM no devolvió datos válidos para esta pregunta, saltando...")
 
 
-if __name__ == "__main__":
-    # fichero = "../ejemplos de preguntas/Sistemas Digitales/resueltas/SSDD_parcial1-2526_v2 - Solucions.docx"
-    # fichero = "../ejemplos de preguntas/Fundamentos Computadores/05.562_20241_PAC1_Solució.pdf"
-    # fichero = "../ejemplos de preguntas/programacion1/kahootLinks.txt"
-    fichero = "src/kahootLinks.txt"
-    ruta_fichero = Path(fichero) # convertimos la ruta del fichero a un path para obtener la extension
+# if __name__ == "__main__":
+#     # fichero = "../ejemplos de preguntas/Sistemas Digitales/resueltas/SSDD_parcial1-2526_v2 - Solucions.docx"
+#     # fichero = "../ejemplos de preguntas/Fundamentos Computadores/05.562_20241_PAC1_Solució.pdf"
+#     # fichero = "../ejemplos de preguntas/programacion1/kahootLinks.txt"
+#     fichero = "src/kahootLinks.txt"
+#     ruta_fichero = Path(fichero) # convertimos la ruta del fichero a un path para obtener la extension
 
-    # fichero de metadatos si hay
-    fichero_metadatos = None 
-    # fichero_metadatos = "../ejemplos de preguntas/programacion1/metainformacion preguntas.docx"
-    fichero_metadatos = "src/metainformacion preguntas.docx"
+#     # fichero de metadatos si hay
+#     fichero_metadatos = None 
+#     # fichero_metadatos = "../ejemplos de preguntas/programacion1/metainformacion preguntas.docx"
+#     fichero_metadatos = "src/metainformacion preguntas.docx"
 
-    metadatos = False # variable para saber si hay documento de metadatos
+#     metadatos = False # variable para saber si hay documento de metadatos
     
     
-    if fichero_metadatos != None:
-        metadatos = True # hay metadatos
-        ruta_fichero_metadatos = Path(fichero_metadatos)
-        texto_metadatos = extraer_texto_docx(ruta_fichero_metadatos)
+#     if fichero_metadatos != None:
+#         metadatos = True # hay metadatos
+#         ruta_fichero_metadatos = Path(fichero_metadatos)
+#         texto_metadatos = extraer_texto_docx(ruta_fichero_metadatos)
 
 
-    # ////////////////  Obtener tipo de fichero  ////////////////
-    match ruta_fichero.suffix:
-        case ".docx":
-            subir_a_minio(fichero) # subimos el archivo original
-            texto_del_documento = extraer_texto_docx(ruta_fichero)
-            llamada_llm()
-        case ".pdf":
-            subir_a_minio(fichero) # subimos le archivo original
-            texto_del_documento = extraer_texto_pdf(ruta_fichero)
-            llamada_llm()
-        case ".txt":
-            with open(ruta_fichero) as file:
-                for line in file:
-                    link_original = line.strip()
-                    if not link_original: continue # saltamos lineas vacias
+#     # ////////////////  Obtener tipo de fichero  ////////////////
+#     match ruta_fichero.suffix:
+#         case ".docx":
+#             subir_a_minio(fichero) # subimos el archivo original
+#             texto_del_documento = extraer_texto_docx(ruta_fichero)
+#             llamada_llm()
+#         case ".pdf":
+#             subir_a_minio(fichero) # subimos le archivo original
+#             texto_del_documento = extraer_texto_pdf(ruta_fichero)
+#             llamada_llm()
+#         case ".txt":
+#             with open(ruta_fichero) as file:
+#                 for line in file:
+#                     link_original = line.strip()
+#                     if not link_original: continue # saltamos lineas vacias
                     
-                    # Creamos un nombre con el codigo del kahoot
-                    id_kahoot = Path(link_original).name
-                    nombre_en_minio = f"link_kahoot_{id_kahoot}.txt"
-                    subir_link_a_minio(link_original, nombre_en_minio)
+#                     # Creamos un nombre con el codigo del kahoot
+#                     id_kahoot = Path(link_original).name
+#                     nombre_en_minio = f"link_kahoot_{id_kahoot}.txt"
+#                     subir_link_a_minio(link_original, nombre_en_minio)
 
-                    nombreKahoot = Path(link_original) # lo convertimos en una ruta para extraer el codigo
-                    linkKahoot = url_kahoot + str(nombreKahoot.name) # concatenamos el link con el codigo del kahoot
-                    respuesta = requests.get(linkKahoot) # hacemos una peticion a la url
-                    texto_del_documento = respuesta.text # obtenemos el json con las preguntas
-                    llamada_llm(metadatos)
+#                     nombreKahoot = Path(link_original) # lo convertimos en una ruta para extraer el codigo
+#                     linkKahoot = url_kahoot + str(nombreKahoot.name) # concatenamos el link con el codigo del kahoot
+#                     respuesta = requests.get(linkKahoot) # hacemos una peticion a la url
+#                     texto_del_documento = respuesta.text # obtenemos el json con las preguntas
+#                     llamada_llm(metadatos)
 
