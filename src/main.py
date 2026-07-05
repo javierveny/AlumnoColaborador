@@ -1,112 +1,128 @@
 import os
-from openai import OpenAI
-from docx import Document
-from pathlib import Path
+import io
 import json
+import re
+import shutil
+from pathlib import Path
+from urllib.parse import quote
+
+import requests
+import pdfplumber
+from docx import Document
+from pydantic import BaseModel
+from openai import OpenAI
+
+from fastapi import FastAPI, UploadFile, File
+from fastapi.responses import StreamingResponse
+
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 from minio import Minio
-import io
-import pdfplumber
-import requests
-import re
-from fastapi import FastAPI, UploadFile, File
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-from urllib.parse import quote
-import shutil
 
+# ==========================================
+# 1. CONFIGURACIÓN Y VARIABLES DE ENTORNO
+# ==========================================
+uri_mongo = os.getenv("MONGO_URI")
+ollama_host = os.getenv("OLLAMA_HOST", "http://ollama:11434")
+api_key_openrouter = os.getenv("OPENROUTER_API_KEY")
 
-# --- INICIALIZACIÓN DE LA API ---
-app = FastAPI(
-    title="API Proyecto Alumno Colaborador",
-    description="API para procesar y consultar exámenes extraídos con IA",
-    version="1.0"
+minio_endpoint = os.getenv("MINIO_ENDPOINT", "minio:9000")
+minio_access_key = os.getenv("MINIO_ROOT_USER")
+minio_secret_key = os.getenv("MINIO_ROOT_PASSWORD")
+minio_bucket = os.getenv("MINIO_BUCKET", "documents")
+
+# Variables globales para el procesamiento en memoria
+texto_del_documento = ""
+texto_metadatos = ""
+url_kahoot = "https://create.kahoot.it/rest/kahoots/"
+
+# ==========================================
+# 2. INICIALIZACIÓN DE CLIENTES EXTERNOS
+# ==========================================
+# Cliente MinIO
+cliente_minio = Minio(
+    minio_endpoint,
+    access_key=minio_access_key,
+    secret_key=minio_secret_key,
+    secure=False
 )
 
-@app.get("/preguntas")
-def obtener_preguntas(
-    asignatura: str = None, 
-    curso: str = None, 
-    nivel_bloom: str = None
-):
-    # 1. Nos conectamos a la base de datos
+# Cliente OpenAI (Conectado a Ollama en local)
+modelo_llm = os.getenv("OLLAMA_MODEL", "llama3.2")
+cliente = OpenAI(
+    base_url=f"{ollama_host}/v1",
+    api_key="ollama",
+)
+
+# ==========================================
+# 3. DEFINICIÓN DE LA API (FastAPI)
+# ==========================================
+app = FastAPI(
+    title="API Proyecto Alumno Colaborador",
+    description="API para procesar y consultar exámenes extraídos con IA local y almacenamiento distribuido.",
+    version="1.0.0"
+)
+
+class PeticionKahoot(BaseModel):
+    url: str
+
+@app.get("/preguntas", tags=["Consultas"])
+def obtener_preguntas(asignatura: str = None, curso: str = None, nivel_bloom: str = None):
+    """Busca preguntas en MongoDB aplicando filtros dinámicos."""
     clienteMongo = MongoClient(uri_mongo, server_api=ServerApi('1'))
     db = clienteMongo["proyecto_alumno_colaborador"]
     coleccion = db["preguntas_examenes"]
 
-    # 2. Construimos el filtro de búsqueda de MongoDB de forma dinámica
     filtro = {}
-    
     if asignatura:
-        # Usamos una expresión regular simple para que la búsqueda no sea sensible a mayusculas
         filtro["Asignatura"] = {"$regex": asignatura, "$options": "i"}
-    
     if curso:
-        filtro["Curso"] = curso # buscamos coincidencia exacta
-        
+        filtro["Curso"] = curso
     if nivel_bloom:
         filtro["Nivel_cognitivo_Bloom"] = {"$regex": nivel_bloom, "$options": "i"}
 
-    # 3. Buscamos aplicando el filtro
     preguntas_db = list(coleccion.find(filtro, {"_id": 0}))
 
-    # 4. Devolvemos el resultado
     return {
         "filtros_aplicados": filtro,
         "total_preguntas": len(preguntas_db),
         "datos": preguntas_db
     }
 
-@app.get("/documentos/{nombre_archivo}")
+@app.get("/documentos/{nombre_archivo}", tags=["Almacenamiento"])
 def descargar_documento(nombre_archivo: str):
+    """Descarga un documento original almacenado en MinIO."""
     try:
-        # 1. Le pedimos el archivo a MinIO
         respuesta_minio = cliente_minio.get_object(minio_bucket, nombre_archivo)
         
-        # 2. Creamos un "generador" para leer el archivo poco a poco y no saturar la RAM
         def iterar_archivo():
             try:
-                # Leemos en trozos de 32KB
                 for pedazo in respuesta_minio.stream(32 * 1024):
                     yield pedazo
             finally:
-                # Cerramos la conexión con MinIO cuando termine
                 respuesta_minio.close()
                 respuesta_minio.release_conn()
 
-        # lo codificamos por si tiene acentos...
         nombre_codificado = quote(nombre_archivo)
-
-        # 3. Devolvemos el archivo al cliente forzando la descarga
         return StreamingResponse(
             iterar_archivo(), 
-            media_type="application/octet-stream", # Tipo genérico para archivos
-            headers={"Content-Disposition": f"attachment; filename={nombre_codificado}"}
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f"attachment; filename*=utf-8''{nombre_codificado}"}
         )
-
     except Exception as e:
         return {"error": f"No se pudo descargar el archivo: {str(e)}"}
 
-# --- MODELOS DE DATOS (Lo que esperamos recibir en los POST) ---
-class PeticionKahoot(BaseModel):
-    url: str
-
-@app.post("/procesar-kahoot")
+@app.post("/procesar-kahoot", tags=["Procesamiento IA"])
 def procesar_kahoot(peticion: PeticionKahoot):
-    # Declaramos que vamos a usar la variable global de tu código
+    """Procesa un JSON de Kahoot mediante su URL, extrae preguntas con IA y las guarda en BD."""
     global texto_del_documento
-    
-    # 1. Extraemos la URL que nos envía el usuario
     link_original = peticion.url
     
     try:
-        # 2. Subimos el link a MinIO (tu código original)
         id_kahoot = Path(link_original).name
         nombre_en_minio = f"link_kahoot_{id_kahoot}.txt"
         subir_link_a_minio(link_original, nombre_en_minio)
 
-        # 3. Descargamos el JSON de Kahoot (tu código original)
         linkKahoot = url_kahoot + str(id_kahoot)
         respuesta = requests.get(linkKahoot)
         
@@ -114,48 +130,37 @@ def procesar_kahoot(peticion: PeticionKahoot):
             return {"error": "No se pudo descargar el Kahoot. Comprueba el link."}
             
         texto_del_documento = respuesta.text
-
-        # 4. Llamamos a tu IA (Asumimos que Kahoot no usa metadatos de Word)
         llamada_llm(info=False)
 
-        # 5. Devolvemos respuesta al cliente
         return {
             "estado": "Éxito",
-            "mensaje": f"El Kahoot {id_kahoot} ha sido procesado, subido a MinIO y guardado en MongoDB."
+            "mensaje": f"El Kahoot {id_kahoot} ha sido procesado y guardado en MongoDB."
         }
-        
     except Exception as e:
-        return {"error": f"Ha ocurrido un fallo inesperado: {str(e)}"}
-    
+        return {"error": f"Error inesperado: {str(e)}"}
 
-@app.post("/procesar-documento")
-def procesar_documento(
-    examen: UploadFile = File(...), 
-    archivo_metadatos: UploadFile = File(None) # Le ponemos None para que sea Opcional
-):
+@app.post("/procesar-documento", tags=["Procesamiento IA"])
+def procesar_documento(examen: UploadFile = File(...), archivo_metadatos: UploadFile = File(None)):
+    """Procesa un PDF/DOCX, lo sube a MinIO y extrae su contenido usando LLMs."""
     global texto_del_documento
     global texto_metadatos
 
     try:
-        # 1. Guardar el archivo de examen temporalmente en el disco
         ruta_examen = f"src/{examen.filename}"
         with open(ruta_examen, "wb") as buffer:
             shutil.copyfileobj(examen.file, buffer)
 
-        # 2. Subir el original a MinIO (Tu función original)
         subir_a_minio(ruta_examen)
-
-        # 3. Extraer el texto según la extensión
         ruta_fichero = Path(ruta_examen)
+
         if ruta_fichero.suffix == ".docx":
             texto_del_documento = extraer_texto_docx(ruta_fichero)
         elif ruta_fichero.suffix == ".pdf":
             texto_del_documento = extraer_texto_pdf(ruta_fichero)
         else:
             os.remove(ruta_examen)
-            return {"error": "Formato de examen no soportado. Solo .pdf o .docx"}
+            return {"error": "Formato no soportado. Solo .pdf o .docx"}
 
-        # 4. Comprobar si el usuario también ha subido un archivo de Metadatos
         tiene_metadatos = False
         if archivo_metadatos:
             ruta_meta = f"src/{archivo_metadatos.filename}"
@@ -167,335 +172,189 @@ def procesar_documento(
                 texto_metadatos = extraer_texto_docx(ruta_meta_path)
                 tiene_metadatos = True
             
-            # Borramos el temporal de metadatos
             os.remove(ruta_meta)
 
-        # 5. Llamamos a la IA (Tu función original)
         llamada_llm(info=tiene_metadatos)
-
-        # 6. Borramos el archivo temporal del examen de nuestro ordenador
         os.remove(ruta_examen)
 
         return {
             "estado": "Éxito",
             "mensaje": f"El documento {examen.filename} ha sido procesado correctamente."
         }
-
     except Exception as e:
-        return {"error": f"Ha ocurrido un fallo inesperado: {str(e)}"}
+        return {"error": f"Error inesperado: {str(e)}"}
 
-
-
-
-
-# Leer las variables del entorno Docker
-uri_mongo = os.getenv("MONGO_URI")
-
-ollama_host = os.getenv("OLLAMA_HOST", "http://ollama:11434")
-
-api_key_openrouter = os.getenv("OPENROUTER_API_KEY")
-
-minio_endpoint = os.getenv("MINIO_ENDPOINT", "minio:9000")
-minio_access_key = os.getenv("MINIO_ROOT_USER")
-minio_secret_key = os.getenv("MINIO_ROOT_PASSWORD")
-minio_bucket = os.getenv("MINIO_BUCKET", "documents")
-
-# inicializamos el cliente de minio
-cliente_minio = Minio(
-    minio_endpoint,
-    access_key=minio_access_key,
-    secret_key=minio_secret_key,
-    secure=False # Ponemos False porque estamos en local sin SSL
-)
-
-# nos conectamos a ollama usando el cliente openAI
-modelo_llm = os.getenv("OLLAMA_MODEL", "llama3.2") # Coge el modelo de tu .env, si no hay pone "llama3.2"
-cliente = OpenAI(
-    base_url=f"{ollama_host}/v1", # Le añadimos /v1 porque así lo pide la librería
-    api_key="ollama", # es necesario poner una key
-)
-
-# conexion a openrouter
-# modelo_llm = "liquid/lfm-2.5-1.2b-thinking:free" # solo saca una pregunta
-# modelo_llm = "google/gemma-4-31b-it:free"
-# cliente = OpenAI(
-#     base_url="https://openrouter.ai/api/v1", # <--- APUNTAMOS A INTERNET
-#     api_key=api_key_openrouter,              # <--- USAMOS TU CLAVE REAL
-# )
-
-# url kahoot json
-url_kahoot = "https://create.kahoot.it/rest/kahoots/"
-
-texto_del_documento = ""
-texto_metadatos = ""
-
-# funcion para subir los archivos originales
+# ==========================================
+# 4. FUNCIONES AUXILIARES Y DE EXTRACCIÓN
+# ==========================================
 def subir_a_minio(ruta_archivo):
     nombre_archivo = Path(ruta_archivo).name
-    
-    # 1. Crear el bucket si no existe
     if not cliente_minio.bucket_exists(minio_bucket):
         cliente_minio.make_bucket(minio_bucket)
-        print(f"Bucket '{minio_bucket}' creado.")
-
-    # 2. Subir el archivo
     try:
-        cliente_minio.fput_object(
-            minio_bucket, 
-            nombre_archivo, 
-            ruta_archivo
-        )
-        print(f"Archivo '{nombre_archivo}' subido con éxito a MinIO.")
+        cliente_minio.fput_object(minio_bucket, nombre_archivo, ruta_archivo)
         return nombre_archivo
     except Exception as err:
         print(f"❌ Error subiendo a MinIO: {err}")
         return None
 
-# funcion para subir el link dell kahoot a minio
 def subir_link_a_minio(link, nombre_archivo):
-    # 1. Convertimos el texto (link) en un flujo de bytes
     datos_bytes = link.encode('utf-8')
     flujo_datos = io.BytesIO(datos_bytes)
-    
-    # 2. Aseguramos que el bucket existe
     if not cliente_minio.bucket_exists(minio_bucket):
         cliente_minio.make_bucket(minio_bucket)
-
-    # 3. Subimos el "archivo" virtual a MinIO
     try:
-        cliente_minio.put_object(
-            minio_bucket,
-            nombre_archivo,
-            flujo_datos,
-            length=len(datos_bytes),
-            content_type='text/plain'
-        )
-        print(f"🔗 Link guardado en MinIO como: {nombre_archivo}")
+        cliente_minio.put_object(minio_bucket, nombre_archivo, flujo_datos, length=len(datos_bytes), content_type='text/plain')
     except Exception as err:
         print(f"❌ Error guardando link en MinIO: {err}")
 
 def extraer_texto_docx(ruta_docx):
     doc = Document(ruta_docx)
     output = []
-
-    # Iteramos por todos los elementos del cuerpo del documento
     for element in doc.element.body:
-        # Detectar Párrafos
         if element.tag.endswith('p'):
-            # Encontrar el objeto párrafo correspondiente
             paragraph = [p for p in doc.paragraphs if p._element == element]
             if paragraph and paragraph[0].text.strip():
-                texto = paragraph[0].text.strip()
-                output.append(texto)
-
-        # Detectar Tablas
+                output.append(paragraph[0].text.strip())
         elif element.tag.endswith('tbl'):
             tabla_obj = [t for t in doc.tables if t._element == element][0]
             output.append("\n[TABLA_START]")
-            
             for i, row in enumerate(tabla_obj.rows):
-                # Extraer texto de cada celda limpiando saltos de linea
                 celdas = [cell.text.replace('\n', ' ').strip() for cell in row.cells]
-                row_str = "| " + " | ".join(celdas) + " |"
-                output.append(row_str)
-                
-                # Si es la primera fila (header), añadir la linea separadora de Markdown
+                output.append("| " + " | ".join(celdas) + " |")
                 if i == 0:
                     separador = "| " + " | ".join(["---"] * len(celdas)) + " |"
                     output.append(separador)
-            
             output.append("[TABLA_END]\n")
-
-    # print(output)
     return "\n".join(output)
-
 
 def extraer_texto_pdf(ruta_pdf):
     output = []
     with pdfplumber.open(ruta_pdf) as pdf:
         for pagina in pdf.pages:
-
-            # extaer 
-            texto_pagina = pagina.extract_text(x_tolerance=3, x_tolerance_ratio=None, y_tolerance=3, layout=False, x_density=7.25, y_density=13, line_dir_render=None, char_dir_render=None)
+            texto_pagina = pagina.extract_text(x_tolerance=3, y_tolerance=3, layout=False)
             if texto_pagina:
                 output.append(texto_pagina)
-
-            # obtener las tablas de la pagina
             tablas = pagina.extract_tables()
-
-            # formatear las tablas para que las entienda el llm
             for tabla in tablas:
                 output.append("\n[TABLA_START]")
-                
                 for fila in tabla:
-                    # A veces hay celdas vacías (None). Las cambiamos por texto vacío ""
-                    # y quitamos los saltos de línea internos de las celdas para no romper el formato
                     fila_limpia = [str(celda).replace('\n', ' ') if celda else "" for celda in fila]
-                    
-                    # Unimos la fila con el separador "|"
-                    fila_str = "| " + " | ".join(fila_limpia) + " |"
-                    output.append(fila_str)
-                    
+                    output.append("| " + " | ".join(fila_limpia) + " |")
                 output.append("[TABLA_END]\n")
-
-    # print(output)
     return "\n".join(output)
 
-
+# ==========================================
+# 5. FUNCIONES DE LLM Y BASE DE DATOS
+# ==========================================
 def procesar_respuesta_llm(respuesta_llm):
-    # eliminamos bloques de codigo markdown
     texto_limpio = respuesta_llm.strip()
     if texto_limpio.startswith("```"):
-        # primera linea (```json) y la ultima (```) las quitamos
         lineas = texto_limpio.splitlines()
         texto_limpio = "\n".join(lineas[1:-1]) if lineas[0].startswith("```") else texto_limpio
-
     try:
-        # devolvemos una lista python
         return json.loads(texto_limpio)
-
     except json.JSONDecodeError as e:
         print(f"Error al decodificar: {e}")
         return None
-    
 
 def comprobar_respuesta_llm(respuesta_llm, campos_requeridos):
-    # comprobamos si existe un formato json
-    match = re.search(r"\[.*\]", respuesta_llm, re.DOTALL)
-
-    # si not match no hay un JSON valido
+    # Uso de .*? (lazy) para evitar capturar texto basura generado por el LLM tras el JSON
+    match = re.search(r"\[.*?\]", respuesta_llm, re.DOTALL)
     if not match:
         print("No es un JSON válido")
         return None
-
-    # obtenemos el json, desde '[' hasta ']'
-    datos_json = match.group(0)
-
-    # intentamos convertirlo a un diccionario, si hay algun typo dara error
     try:
-        datos_json =  json.loads(datos_json)
+        datos_json = json.loads(match.group(0))
     except json.JSONDecodeError:
         print("Había algun error en el JSON")
         return None
-    
-    # comprobamos si esta vacio
     if len(datos_json) == 0:
-        print("❌ El JSON está vacío, no ha extraído ninguna pregunta.")
+        print("❌ El JSON está vacío.")
         return None
-
     for pregunta in datos_json:
-        # Convertimos las claves del diccionario de la IA en un Set
-        claves_ia = set(pregunta.keys())
-        
-        # Comparamos si son EXACTAMENTE iguales
-        if claves_ia != campos_requeridos:
+        if set(pregunta.keys()) != campos_requeridos:
             print(f"Error de formato: La IA ha devuelto campos incorrectos.")
-            # Aquí podrías ver qué falta o sobra para decírselo al LLM en el reintento:
-            # faltan = campos_requeridos - claves_ia
-            # sobran = claves_ia - campos_requeridos
             return None
-    
     return datos_json
-    
 
-# funcion principal para hacer las llamadas a la api y guardar en la base de datos
-# llamada a la api del llm
-def llamada_llm(info = False):
-    
+def llamada_llm(info=False):
     i = 5
     datos = None
-
-    while (i > 0):
-
+    while i > 0:
         if not info:
             completion = cliente.chat.completions.create(
-            extra_headers={},
-            extra_body={},
-            model=modelo_llm,
-            messages = [
-                {
-                    "role": "system",
-                    "content": (
-                        "Eres un extractor de datos técnicos preciso. Tu única función es transformar un JSON de Kahoot a una LISTA de objetos JSON.\n"
-                        "REGLA DE ORO: Debes generar UN objeto JSON por cada pregunta encontrada en el array 'questions'. No omitas ninguna.\n"
-                        "REGLA DE COPIA: El 'Enunciado_completo' debe incluir la pregunta seguida de todas sus opciones (A, B, C, D).\n"
-                        "REGLA DE CURSO: Elige estrictamente entre 'Primero', 'Segundo', 'Tercero', 'Cuarto'.\n"
-                        "REGLA DE SOLUCIÓN: Escribe el texto exacto de la opción marcada como 'correct': true."
-                    )
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        "Transforma TODAS las preguntas de este examen a este formato de lista de Python [{}, {}, ...]:\n"
-                        "[\n"
-                        "  {\n"
-                        '    "Asignatura": "...",\n'
-                        '    "Curso": "Primero, Segundo, Tercero o Cuarto",\n'
-                        '    "Estudios": "...",\n'
-                        '    "Enunciado_completo": "...Si es tipo test, pon las posibles respuestas en el enunciado",\n'
-                        '    "Solución": "..."\n'
-                        "  }\n"
-                        "]\n\n"
-                        f"TEXTO DEL EXAMEN:\n{texto_del_documento}"
-                    )
-                }
-            ],
-            temperature = 0
+                model=modelo_llm,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Eres un extractor de datos técnicos preciso. Tu única función es transformar un JSON de Kahoot a una LISTA de objetos JSON.\n"
+                            "REGLA DE ORO: Debes generar UN objeto JSON por cada pregunta. No omitas ninguna.\n"
+                            "REGLA DE COPIA: El 'Enunciado_completo' debe incluir la pregunta seguida de todas sus opciones.\n"
+                            "REGLA DE CURSO: Elige estrictamente entre 'Primero', 'Segundo', 'Tercero', 'Cuarto'.\n"
+                            "REGLA DE SOLUCIÓN: Escribe el texto exacto de la opción marcada como 'correct': true."
+                        )
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            "Transforma TODAS las preguntas de este examen a este formato de lista de Python [{}, {}, ...]:\n"
+                            "[\n  {\n"
+                            '    "Asignatura": "...",\n'
+                            '    "Curso": "Primero, Segundo, Tercero o Cuarto",\n'
+                            '    "Estudios": "...",\n'
+                            '    "Enunciado_completo": "...",\n'
+                            '    "Solución": "..."\n'
+                            "  }\n]\n\n"
+                            f"TEXTO DEL EXAMEN:\n{texto_del_documento}"
+                        )
+                    }
+                ],
+                temperature=0
             )
-
             campos_requeridos = {"Asignatura", "Curso", "Estudios", "Enunciado_completo", "Solución"}
-
-
-        else: # si ya tenemos metadatos rellanados hacemos este otro prompt
+        else:
             completion = cliente.chat.completions.create(
-            extra_headers={},
-            extra_body={},
-            model=modelo_llm,
-            messages = [
-                {
-                    "role": "system",
-                    "content": (
-                        "Eres un extractor de datos académicos estructurados. Tu salida debe ser EXCLUSIVAMENTE "
-                        "una LISTA de objetos JSON (un array de Python [{}, {}]).\n"
-                        "REGLA CRÍTICA DE FUSIÓN: Vas a recibir dos textos: 'METADATOS' y 'EXAMEN'. "
-                        "Debes crear un objeto JSON por CADA pregunta que encuentres en el texto del EXAMEN.\n"
-                        "REGLA CRÍTICA DE COPIA: Para cada pregunta, debes COPIAR EXACTAMENTE todos los campos de los METADATOS (Asignatura, Estudios, Autores, Nivel_cognitivo_Bloom, Tipo_pregunta, Competencias_relacionadas, Nivel de dificultad, Tema / topic, Idioma). Estos valores serán idénticos para todas las preguntas de este lote.\n"
-                        "REGLA CRÍTICA DE EXTRACCIÓN: Los únicos campos que cambian en cada objeto JSON son 'Enunciado_completo' y 'Solución', los cuales debes extraer individualmente del texto del EXAMEN.\n"
-                        "REGLA CRÍTICA PARA 'Curso': Lee el curso en los metadatos y elige únicamente entre: 'Primero', 'Segundo', 'Tercero', 'Cuarto'.\n"
-                        "REGLA CRÍTICA, Si hay preguntas tipo test, selección múltiple... en el enunciado tiene que haber todas las posibles respuestas. ES OBLIGATORIO"
-                    )
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        "Analiza los metadatos y el texto del examen, y genera la lista de JSONs con este formato:\n"
-                        "[\n"
-                        "  {\n"
-                        '    "Asignatura": "... (Copiado de METADATOS)",\n'
-                        '    "Curso": "Primero, Segundo, Tercero o Cuarto (Copiado de METADATOS)",\n'
-                        '    "Estudios": "... (Copiado de METADATOS)",\n'
-                        '    "Autores": "... (Copiado de METADATOS)",\n'
-                        '    "Nivel_cognitivo_Bloom": "... (Copiado de METADATOS)",\n'
-                        '    "Tipo_pregunta": "... (Copiado de METADATOS)",\n'
-                        '    "Competencias_relacionadas": "... (Copiado de METADATOS)",\n'
-                        '    "Nivel de dificultad": "... (Copiado de METADATOS)",\n'
-                        '    "Tema / topic": "... (Copiado de METADATOS)",\n'
-                        '    "Idioma": "... (Copiado de METADATOS)",\n'
-                        '    "Enunciado_completo": "...Si es tipo test, pon las posibles respuestas en el enunciado (Extraído del EXAMEN para esta pregunta en concreto)",\n'
-                        '    "Solución": "... (Extraído del EXAMEN para esta pregunta en concreto)"\n'
-                        "  }\n"
-                        "]\n\n"
-                        f"--- METADATOS GLOBALES ---\n{texto_metadatos}\n\n"
-                        f"--- TEXTO DEL EXAMEN (PREGUNTAS Y RESPUESTAS) ---\n{texto_del_documento}"
-                    )
-                }
-            ]
+                model=modelo_llm,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Eres un extractor de datos académicos estructurados. Tu salida debe ser EXCLUSIVAMENTE una LISTA de objetos JSON.\n"
+                            "REGLA CRÍTICA DE COPIA: Copia EXACTAMENTE los campos de los METADATOS para todas las preguntas.\n"
+                            "REGLA CRÍTICA DE EXTRACCIÓN: Extrae 'Enunciado_completo' y 'Solución' individualmente del texto del EXAMEN.\n"
+                            "REGLA CRÍTICA PARA 'Curso': Elige únicamente entre: 'Primero', 'Segundo', 'Tercero', 'Cuarto'.\n"
+                            "Si hay preguntas tipo test, pon todas las posibles respuestas en el enunciado."
+                        )
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            "Analiza los metadatos y el texto del examen, y genera la lista de JSONs con este formato:\n"
+                            "[\n  {\n"
+                            '    "Asignatura": "...",\n'
+                            '    "Curso": "...",\n'
+                            '    "Estudios": "...",\n'
+                            '    "Autores": "...",\n'
+                            '    "Nivel_cognitivo_Bloom": "...",\n'
+                            '    "Tipo_pregunta": "...",\n'
+                            '    "Competencias_relacionadas": "...",\n'
+                            '    "Nivel de dificultad": "...",\n'
+                            '    "Tema / topic": "...",\n'
+                            '    "Idioma": "...",\n'
+                            '    "Enunciado_completo": "...",\n'
+                            '    "Solución": "..."\n'
+                            "  }\n]\n\n"
+                            f"--- METADATOS GLOBALES ---\n{texto_metadatos}\n\n"
+                            f"--- TEXTO DEL EXAMEN ---\n{texto_del_documento}"
+                        )
+                    }
+                ]
             )
-
             campos_requeridos = {"Asignatura", "Curso", "Estudios", "Autores", "Nivel_cognitivo_Bloom", "Tipo_pregunta", "Competencias_relacionadas", "Nivel de dificultad", "Tema / topic", "Idioma", "Enunciado_completo", "Solución"}
 
         respuesta_llm = completion.choices[0].message.content
-
         datos = comprobar_respuesta_llm(respuesta_llm, campos_requeridos)
 
         if datos is None:
@@ -506,130 +365,52 @@ def llamada_llm(info = False):
 
     if datos is None:
         print("⚠️ Se han agotado los 5 intentos. Abortando esta extracción.")
-
-        print("\n🚨 --- LO QUE RESPONDIÓ LA IA EN EL ÚLTIMO INTENTO --- 🚨")
-        print(respuesta_llm)
-        print("🚨 --------------------------------------------------- 🚨\n")
         return
     else:
         with open("src/data.json", "w", encoding="utf-8") as f:
             json.dump(datos, f, ensure_ascii=False, indent=4)
-        print("✅ Json guardado correctamente como copia de seguridad.")
-        
-        # Pasamos los datos directamente por la memoria a la siguiente función
         segunda_iteracion_llm(datos)
 
-
 def segunda_iteracion_llm(datos):
-    # ////////////////  Segunda iteracion sobre cada pregunta  ////////////////
-
-    # leemos el fichero de competencias
     with open("src/competencias.json", 'r', encoding='utf-8') as file:
         competencias = json.load(file)
 
-
-    # ////////////////  Conexion con MongoDB  ////////////////
-    # creamos un nuevo cliente y nos conectamos al servidor
     clienteMongo = MongoClient(uri_mongo, server_api=ServerApi('1'))
+    coleccion = clienteMongo["proyecto_alumno_colaborador"]["preguntas_examenes"]
 
-    #  declaramos la base de datos y la coleccion
-    db = clienteMongo["proyecto_alumno_colaborador"]
-    coleccion = db["preguntas_examenes"]
-
-    # recorremos la lista para rellenar los otros campos
     for elemento in datos:
         completion = cliente.chat.completions.create(
-        extra_headers={},
-        extra_body={},
-        model=modelo_llm,
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "Eres un clasificador académico estricto. Tu tarea es analizar una pregunta y devolver EXCLUSIVAMENTE un único objeto JSON (no una lista).\n"
-                    "REGLA DE FORMATO: Devuelve ÚNICAMENTE estas 3 claves. Está prohibido devolver la pregunta original o cualquier otra clave.\n"
-                    "1. 'Nivel_cognitivo_Bloom': Analiza el verbo de la pregunta y elige uno de: 'Recordar', 'Entender', 'Aplicar', 'Analizar', 'Evaluar', 'Crear'.\n"
-                    "2. 'Tipo_pregunta': Elige uno de: 'Resolución de problemas', 'Diseño/Modelado', 'Análisis de caso práctico', 'Test. Opción múltiple', 'Respuesta corta', 'Codificación', 'Ensayo breve'.\n"
-                    "3. 'Competencias_detalladas': Analiza la clave 'Competencias_relacionadas' de la pregunta. Busca esos códigos en el CATÁLOGO DE COMPETENCIAS y devuelve una lista (array) con las descripciones completas que correspondan."
-                )
-            },
-            {
-                "role": "user",
-                "content": (
-                    "Genera el JSON con la clasificación para esta pregunta. Devuelve SOLO las 3 claves solicitadas en este formato:\n"
-                    "{\n"
-                    '  "Nivel_cognitivo_Bloom": "...",\n'
-                    '  "Tipo_pregunta": "...",\n'
-                    '  "Competencias_detalladas": ["descripción 1", "descripción 2"]\n'
-                    "}\n\n"
-                    "--- CATÁLOGO DE COMPETENCIAS ---\n"
-                    f"{competencias}\n\n"
-                    "--- PREGUNTA A ANALIZAR ---\n"
-                    f"{json.dumps(elemento, ensure_ascii=False)}"
-                )
-            }
-        ]
+            model=modelo_llm,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Eres un clasificador académico estricto. Tu tarea es analizar una pregunta y devolver EXCLUSIVAMENTE un único objeto JSON.\n"
+                        "1. 'Nivel_cognitivo_Bloom': 'Recordar', 'Entender', 'Aplicar', 'Analizar', 'Evaluar', 'Crear'.\n"
+                        "2. 'Tipo_pregunta': 'Resolución de problemas', 'Diseño/Modelado', 'Análisis de caso práctico', 'Test. Opción múltiple', 'Respuesta corta', 'Codificación', 'Ensayo breve'.\n"
+                        "3. 'Competencias_detalladas': Busca los códigos en el CATÁLOGO y devuelve un array con las descripciones."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "Genera el JSON con la clasificación. Devuelve SOLO las 3 claves:\n"
+                        "{\n"
+                        '  "Nivel_cognitivo_Bloom": "...",\n'
+                        '  "Tipo_pregunta": "...",\n'
+                        '  "Competencias_detalladas": ["..."]\n'
+                        "}\n\n"
+                        f"--- CATÁLOGO ---\n{competencias}\n\n"
+                        f"--- PREGUNTA ---\n{json.dumps(elemento, ensure_ascii=False)}"
+                    )
+                }
+            ]
         )
-        # pasamos la respuesta del llm a una lista de python
         respuesta_llm = procesar_respuesta_llm(completion.choices[0].message.content)
 
-
         if respuesta_llm and len(respuesta_llm) > 0:
-            # Mezclamos el objeto original con el del LLM
             elemento.update(respuesta_llm)
-            
-            # 3. Guardamos el objeto COMPLETO
             coleccion.insert_one(elemento)
-            print(f"✅ Guardado completo en MongoDB: {elemento.get('Asignatura')}")
+            print(f"✅ Guardado en MongoDB: {elemento.get('Asignatura')}")
         else:
-            print("⚠️ El LLM no devolvió datos válidos para esta pregunta, saltando...")
-
-
-# if __name__ == "__main__":
-#     # fichero = "../ejemplos de preguntas/Sistemas Digitales/resueltas/SSDD_parcial1-2526_v2 - Solucions.docx"
-#     # fichero = "../ejemplos de preguntas/Fundamentos Computadores/05.562_20241_PAC1_Solució.pdf"
-#     # fichero = "../ejemplos de preguntas/programacion1/kahootLinks.txt"
-#     fichero = "src/kahootLinks.txt"
-#     ruta_fichero = Path(fichero) # convertimos la ruta del fichero a un path para obtener la extension
-
-#     # fichero de metadatos si hay
-#     fichero_metadatos = None 
-#     # fichero_metadatos = "../ejemplos de preguntas/programacion1/metainformacion preguntas.docx"
-#     fichero_metadatos = "src/metainformacion preguntas.docx"
-
-#     metadatos = False # variable para saber si hay documento de metadatos
-    
-    
-#     if fichero_metadatos != None:
-#         metadatos = True # hay metadatos
-#         ruta_fichero_metadatos = Path(fichero_metadatos)
-#         texto_metadatos = extraer_texto_docx(ruta_fichero_metadatos)
-
-
-#     # ////////////////  Obtener tipo de fichero  ////////////////
-#     match ruta_fichero.suffix:
-#         case ".docx":
-#             subir_a_minio(fichero) # subimos el archivo original
-#             texto_del_documento = extraer_texto_docx(ruta_fichero)
-#             llamada_llm()
-#         case ".pdf":
-#             subir_a_minio(fichero) # subimos le archivo original
-#             texto_del_documento = extraer_texto_pdf(ruta_fichero)
-#             llamada_llm()
-#         case ".txt":
-#             with open(ruta_fichero) as file:
-#                 for line in file:
-#                     link_original = line.strip()
-#                     if not link_original: continue # saltamos lineas vacias
-                    
-#                     # Creamos un nombre con el codigo del kahoot
-#                     id_kahoot = Path(link_original).name
-#                     nombre_en_minio = f"link_kahoot_{id_kahoot}.txt"
-#                     subir_link_a_minio(link_original, nombre_en_minio)
-
-#                     nombreKahoot = Path(link_original) # lo convertimos en una ruta para extraer el codigo
-#                     linkKahoot = url_kahoot + str(nombreKahoot.name) # concatenamos el link con el codigo del kahoot
-#                     respuesta = requests.get(linkKahoot) # hacemos una peticion a la url
-#                     texto_del_documento = respuesta.text # obtenemos el json con las preguntas
-#                     llamada_llm(metadatos)
-
+            print("⚠️ El LLM no devolvió datos válidos para esta pregunta.")
