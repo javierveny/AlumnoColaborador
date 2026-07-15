@@ -48,12 +48,23 @@ cliente_minio = Minio(
     secure=False
 )
 
-# Cliente OpenAI (Conectado a Ollama en local)
-modelo_llm = os.getenv("OLLAMA_MODEL", "llama3.2")
-cliente = OpenAI(
-    base_url=f"{ollama_host}/v1",
-    api_key="ollama",
-)
+# Interruptor para decidir qué IA usar (Por defecto usara 'ollama' pero se puede modificar)
+proveedor_ia = os.getenv("LLM_PROVIDER", "ollama").lower()
+
+if proveedor_ia == "openrouter":
+    modelo_llm = os.getenv("OPENROUTER_MODEL", "google/gemma-2-9b-it:free") # Modelo por defecto en la nube
+    cliente = OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=api_key_openrouter,
+    )
+    print(f"Conectado a OpenRouter usando el modelo: {modelo_llm}")
+else:
+    modelo_llm = os.getenv("OLLAMA_MODEL", "llama3.2")
+    cliente = OpenAI(
+        base_url=f"{ollama_host}/v1",
+        api_key="ollama",
+    )
+    print(f"Conectado a Ollama local usando el modelo: {modelo_llm}")
 
 # ==========================================
 # 3. DEFINICIÓN DE LA API (FastAPI)

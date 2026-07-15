@@ -29,6 +29,12 @@ Crea un archivo llamado `.env` en la raíz del proyecto basándote en el archivo
 
 Rellena los datos en tu nuevo archivo .env (credenciales de Mongo, MinIO, etc.).
 
+### 1.1 Alternar entre IA Local y Nube (OpenRouter)
+El sistema está preparado para usar modelos locales (gratis y privados) o modelos avanzados en la nube vía OpenRouter. Para alternar entre ellos, solo tienes que modificar la variable `LLM_PROVIDER` en tu archivo `.env`:
+
+* **Para usar IA Local:** Configura `LLM_PROVIDER=ollama` y asegúrate de tener el modelo descargado en tu servidor de Ollama (ej. `OLLAMA_MODEL=llama3.2`).
+* **Para usar OpenRouter:** Configura `LLM_PROVIDER=openrouter`. Necesitarás añadir tu API Key en la variable `OPENROUTER_API_KEY` y definir el modelo deseado en `OPENROUTER_MODEL`.
+
 ### 2. Ejecutar con CPU (Mac / Linux estándar)
 Si no dispones de una GPU dedicada, levanta el proyecto utilizando el archivo base:
     
