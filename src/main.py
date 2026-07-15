@@ -95,6 +95,7 @@ def descargar_documento(nombre_archivo: str):
     try:
         respuesta_minio = cliente_minio.get_object(minio_bucket, nombre_archivo)
         
+        # Se transmite por chunks para no cargar el archivo completo en memoria.
         def iterar_archivo():
             try:
                 for pedazo in respuesta_minio.stream(32 * 1024):
@@ -146,6 +147,7 @@ def procesar_documento(examen: UploadFile = File(...), archivo_metadatos: Upload
     global texto_metadatos
 
     try:
+        # Guardamos el archivo temporalmente para poder extraer texto y subirlo a MinIO.
         ruta_examen = f"src/{examen.filename}"
         with open(ruta_examen, "wb") as buffer:
             shutil.copyfileobj(examen.file, buffer)
@@ -211,6 +213,7 @@ def subir_link_a_minio(link, nombre_archivo):
 def extraer_texto_docx(ruta_docx):
     doc = Document(ruta_docx)
     output = []
+    # Recorremos parrafos y tablas en el orden original del documento.
     for element in doc.element.body:
         if element.tag.endswith('p'):
             paragraph = [p for p in doc.paragraphs if p._element == element]
@@ -232,6 +235,7 @@ def extraer_texto_pdf(ruta_pdf):
     output = []
     with pdfplumber.open(ruta_pdf) as pdf:
         for pagina in pdf.pages:
+            # Primero extraemos el texto plano y despues las tablas de cada pagina.
             texto_pagina = pagina.extract_text(x_tolerance=3, y_tolerance=3, layout=False)
             if texto_pagina:
                 output.append(texto_pagina)
@@ -259,7 +263,7 @@ def procesar_respuesta_llm(respuesta_llm):
         return None
 
 def comprobar_respuesta_llm(respuesta_llm, campos_requeridos):
-    # Uso de .*? (lazy) para evitar capturar texto basura generado por el LLM tras el JSON
+    # Uso de .*? para no capturar texto extra generado por el LLM tras el JSON
     match = re.search(r"\[.*?\]", respuesta_llm, re.DOTALL)
     if not match:
         print("No es un JSON válido")
@@ -379,6 +383,7 @@ def segunda_iteracion_llm(datos):
     coleccion = clienteMongo["proyecto_alumno_colaborador"]["preguntas_examenes"]
 
     for elemento in datos:
+        # clasificamos cada pregunta antes de guardarla en MongoDB.
         completion = cliente.chat.completions.create(
             model=modelo_llm,
             messages=[
