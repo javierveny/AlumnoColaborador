@@ -1,30 +1,9 @@
 [
     {
-        "Asignatura": "Informàtica Multimèdia i Telecomunicació",
-        "Curso": "Primero, Segundo, Tercero o Cuarto",
-        "Estudios": "Estudis d’Informàtica Multimèdia i Telecomunicació",
-        "Enunciado_completo": "Donats els nombres binaris següents: A = 11101101 B = 10011010 Realitzeu les operacions demanades segons el format indicat a cada apartat. Mostreu els resultats únicament en binari (no cal fer cap conversió a decimal) usant 8 bits, i indiqueu i justifiqueu en tots els casos si es produeix sobreeiximent.\na) [10%] A + B considerant que els nombres estan codificats en signe i magnitud. Per sumar dos nombres amb el mateix signe en signe i magnitud caldrà fer la suma de les magnituds i ficar al resultat el signe dels operands.\nFem la suma de les dues magnituds:\n1 1 1 1 ← ròssec\n1 1 0 1 1 0 1 ← A\n+ 0 0 1 1 0 1 0 ←B\n1 0 0 0 0 1 1 1",
-        "Solución": "Hi ha sobreeiximent. Al sumar dos nombres en signe i magnitud, si es produeix ròssec en l’última etapa de la suma de les magnituds, vol dir que el resultat no cap en el format definit i, per tant, no es pot representar."
-    },
-    {
-        "Asignatura": "Informàtica Multimèdia i Telecomunicació",
-        "Curso": "Primero, Segundo, Tercero o Cuarto",
-        "Estudios": "Estudis d’Informàtica Multimèdia i Telecomunicació",
-        "Enunciado_completo": "Donats els nombres binaris següents: A = 11101101 B = 10011010 Realitzeu les operacions demanades segons el format indicat a cada apartat. Mostreu els resultats únicament en binari (no cal fer cap conversió a decimal) usant 8 bits, i indiqueu i justifiqueu en tots els casos si es produeix sobreeiximent.\nb) [10%] A - B considerant que els nombres estan codificats en signe i magnitud. Per restar nombres codificats en signe i magnitud primer caldrà observar el signe dels nombres. En aquest cas, els dos nombres són negatius.\nAl tenir B la magnitud menor, l’operació és una resta entre la magnitud d’A i la magnitud de B.\n1 1 0 1 1 0 1 ← A\n1 1 ← ròssec\n- 0 0 1 1 0 1 0 ←B",
-        "Solución": "El resultat obté el bit de signe negatiu (1) del primer operand.\nA – B = 11010011"
-    },
-    {
-        "Asignatura": "Informàtica Multimèdia i Telecomunicació",
-        "Curso": "Primero, Segundo, Tercero o Cuarto",
-        "Estudios": "Estudis d’Informàtica Multimèdia i Telecomunicació",
-        "Enunciado_completo": "Donats els nombres binaris següents: A = 11101101 B = 10011010 Realitzeu les operacions demanades segons el format indicat a cada apartat. Mostreu els resultats únicament en binari (no cal fer cap conversió a decimal) usant 8 bits, i indiqueu i justifiqueu en tots els casos si es produeix sobreeiximent.\nc) [10%] A + B considerant que els nombres estan codificats en complement a 2. La suma d’A i B en complement a 2 es realitza sumant els dos nombres directament.\n1 1 1 1 1 ← ròssec\n1 1 1 0 1 1 0 1 ← A\n(Ca2\n+ 1 0 0 1 1 0 1 0 ← B\n(Ca2",
-        "Solución": "El resultat de la suma és 10000111"
-    },
-    {
-        "Asignatura": "Informàtica Multimèdia i Telecomunicació",
-        "Curso": "Primero, Segundo, Tercero o Cuarto",
-        "Estudios": "Estudis d’Informàtica Multimèdia i Telecomunicació",
-        "Enunciado_completo": "Donats els nombres binaris següents: A = 11101101 B = 10011010 Realitzeu les operacions demanades segons el format indicat a cada apartat. Mostreu els resultats únicament en binari (no cal fer cap conversió a decimal) usant 8 bits, i indiqueu i justifiqueu en tots els casos si es produeix sobreeiximent.\nd) [10%] A - B considerant que els nombres estan codificats en complement a 2. L’operació de resta d’A i de B en complement a 2 implica fer un canvi de signe de B i realitzar la suma d’A amb el resultat.\nPer aplicar els canvis de signe al valor B fem:\n- El complement bit a bit de B = 10011010, s’obté la cadena de bits: 01100101\n- Sumem 1 al bit menys significatiu:\n1 ← ròssec\n0 1 1 0 0 1 0 1 ← B\n(Ca2\n+ 1\n0 1 1 0 0 1 1 0 ← - B\n(Ca2",
-        "Solución": "El resultat és: 01010011"
+        "Asignatura": "Programació I",
+        "Curso": "Primero",
+        "Estudios": "GMAT",
+        "Enunciado_completo": "Escriu un programa que llegeixi les coordenades d’un punt (2 valors) i indiqui en el quadrant (del sistema cartesià) en el qual es troba aquest punt. Consideram el primer quadrant aquell on els dos valors són positius i rotarem com les manetes del rellotge, si una de les components és 0, el programa mostrarà la frase “Quadrant indeterminat”.",
+        "Solución": "Es al primer quadrant"
     }
 ]

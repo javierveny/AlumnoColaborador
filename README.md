@@ -55,7 +55,7 @@ FastAPI genera automáticamente una documentación interactiva (Swagger UI). Pue
 ### Resumen de Rutas:
 * `POST /procesar-documento`: Sube un archivo PDF/DOCX (y opcionalmente un archivo de metadatos) para extraer sus preguntas con IA.
 * `POST /procesar-kahoot`: Envía un enlace de un Kahoot público para extraer e indexar sus preguntas.
-* `GET /preguntas`: Consulta la base de datos de MongoDB. Permite aplicar filtros dinámicos por `asignatura`, `curso` y `nivel_bloom`.
+* `GET /preguntas`: Consulta la base de datos de MongoDB. Permite aplicar filtros dinámicos por `asignatura`, `curso` y `nivel_bloom`, así como seleccionar que campos quieres visualizar.
 * `GET /documentos/{nombre_archivo}`: Descarga un documento original almacenado previamente en MinIO.
 
 ## Tecnologías Utilizadas

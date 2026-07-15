@@ -11,8 +11,9 @@ import pdfplumber
 from docx import Document
 from pydantic import BaseModel
 from openai import OpenAI
+from enum import Enum
 
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Query
 from fastapi.responses import StreamingResponse
 
 from pymongo.mongo_client import MongoClient
@@ -63,12 +64,31 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# declaramos los campos de las preguntas
+class CampoPregunta(str, Enum):
+    asignatura = "Asignatura"
+    curso = "Curso"
+    estudios = "Estudios"
+    autores = "Autores"
+    nivel_bloom = "Nivel_cognitivo_Bloom"
+    tipo_pregunta = "Tipo_pregunta"
+    competencias = "Competencias_relacionadas"
+    dificultad = "Nivel de dificultad"
+    tema = "Tema / topic"
+    idioma = "Idioma"
+    enunciado = "Enunciado_completo"
+    solucion = "Solución"
+
 class PeticionKahoot(BaseModel):
     url: str
 
 @app.get("/preguntas", tags=["Consultas"])
-def obtener_preguntas(asignatura: str = None, curso: str = None, nivel_bloom: str = None):
-    """Busca preguntas en MongoDB aplicando filtros dinámicos."""
+def obtener_preguntas(asignatura: str = None,
+                      curso: str = None,
+                      nivel_bloom: str = None,
+                      campos: list[CampoPregunta] = Query(None, description="Selecciona los campos que quieres que devuelva la API")):
+    
+    """Busca preguntas en MongoDB aplicando filtros dinámicos y permitiendo elegir los campos a devolver."""
     clienteMongo = MongoClient(uri_mongo, server_api=ServerApi('1'))
     db = clienteMongo["proyecto_alumno_colaborador"]
     coleccion = db["preguntas_examenes"]
@@ -81,10 +101,23 @@ def obtener_preguntas(asignatura: str = None, curso: str = None, nivel_bloom: st
     if nivel_bloom:
         filtro["Nivel_cognitivo_Bloom"] = {"$regex": nivel_bloom, "$options": "i"}
 
-    preguntas_db = list(coleccion.find(filtro, {"_id": 0}))
+    # 2. Construcción de la Proyección (Los campos que queremos que devuelva)
+    proyeccion = {"_id": 0}
+    
+    if campos:
+        for campo in campos:
+            # campo.value extrae el texto real (ej: "Enunciado_completo")
+            proyeccion[campo.value] = 1
+
+    # 3. Búsqueda en la BD aplicando filtro y proyección
+    preguntas_db = list(coleccion.find(filtro, proyeccion))
+
+    # Extraemos los nombres legibles para la respuesta
+    nombres_campos = [c.value for c in campos] if campos else "Todos"
 
     return {
         "filtros_aplicados": filtro,
+        "campos_devueltos": nombres_campos,
         "total_preguntas": len(preguntas_db),
         "datos": preguntas_db
     }
@@ -197,7 +230,7 @@ def subir_a_minio(ruta_archivo):
         cliente_minio.fput_object(minio_bucket, nombre_archivo, ruta_archivo)
         return nombre_archivo
     except Exception as err:
-        print(f"❌ Error subiendo a MinIO: {err}")
+        print(f"Error subiendo a MinIO: {err}")
         return None
 
 def subir_link_a_minio(link, nombre_archivo):
@@ -208,7 +241,7 @@ def subir_link_a_minio(link, nombre_archivo):
     try:
         cliente_minio.put_object(minio_bucket, nombre_archivo, flujo_datos, length=len(datos_bytes), content_type='text/plain')
     except Exception as err:
-        print(f"❌ Error guardando link en MinIO: {err}")
+        print(f"Error guardando link en MinIO: {err}")
 
 def extraer_texto_docx(ruta_docx):
     doc = Document(ruta_docx)
@@ -364,11 +397,11 @@ def llamada_llm(info=False):
         if datos is None:
             i -= 1
         else:
-            print("🎉 ¡La IA ha acertado el formato!")
+            print("¡La IA ha acertado el formato!")
             break 
 
     if datos is None:
-        print("⚠️ Se han agotado los 5 intentos. Abortando esta extracción.")
+        print("Se han agotado los 5 intentos. Abortando esta extracción.")
         return
     else:
         with open("src/data.json", "w", encoding="utf-8") as f:
@@ -416,6 +449,6 @@ def segunda_iteracion_llm(datos):
         if respuesta_llm and len(respuesta_llm) > 0:
             elemento.update(respuesta_llm)
             coleccion.insert_one(elemento)
-            print(f"✅ Guardado en MongoDB: {elemento.get('Asignatura')}")
+            print(f"Guardado en MongoDB: {elemento.get('Asignatura')}")
         else:
-            print("⚠️ El LLM no devolvió datos válidos para esta pregunta.")
+            print("El LLM no devolvió datos válidos para esta pregunta.")
